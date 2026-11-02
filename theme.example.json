@@ -1,0 +1,5 @@
+{
+  "gpu_thresholds": [30, 80],
+  "vram_thresholds": [50, 80],
+  "ascii": false
+}

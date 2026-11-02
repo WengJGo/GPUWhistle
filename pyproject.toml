@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpuwhistle"
+version = "0.2.0"
+description = "GPUWhistle: sampled NVIDIA GPU activity and Linux user auditing"
+readme = "README.md"
+authors = [{name = "WenJGo"}]
+requires-python = ">=3.9"
+dependencies = ["nvidia-ml-py>=12.535"]
+license = {text = "MIT"}
+
+[project.scripts]
+gpumonitor = "gpumonitor.cli:main"
+seegpu = "gpumonitor.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["gpumonitor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.urls]
+Homepage = "https://github.com/WengJGo/GPUWhistle"
+Repository = "https://github.com/WengJGo/GPUWhistle"
+Issues = "https://github.com/WengJGo/GPUWhistle/issues"

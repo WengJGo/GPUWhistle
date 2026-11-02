@@ -1,0 +1,10 @@
+# Managed by GPUmonitor v1
+[Unit]
+Description=GPUWhistle sampling timer
+[Timer]
+OnActiveSec=60
+OnUnitActiveSec=600s
+AccuracySec=1s
+Unit=gpumonitor.service
+[Install]
+WantedBy=timers.target

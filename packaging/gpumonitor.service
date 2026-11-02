@@ -1,0 +1,10 @@
+# Managed by GPUmonitor v1
+# Reference only; schedule install generates absolute, quoted paths.
+[Unit]
+Description=GPUWhistle read-only sampling
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/gpumonitor once
+UMask=0077
+Nice=10
+TimeoutStartSec=130

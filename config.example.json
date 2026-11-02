@@ -1,0 +1,11 @@
+{
+  "duration": 10,
+  "interval": 1,
+  "period": 600,
+  "retention_days": 30,
+  "idle_memory_bytes": 1073741824,
+  "idle_windows": 3,
+  "active_threshold": 10,
+  "min_util_coverage": 0.6,
+  "database": ""
+}
