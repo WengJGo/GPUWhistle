@@ -135,7 +135,7 @@ def colors(theme=None):
             curses.init_pair(index, foreground, -1)
         green, yellow, red, cyan = (curses.color_pair(i) for i in range(1, 5))
         base.update(load_low=green, load_medium=yellow, load_high=red,
-                    ACTIVE=green, LOW_ACTIVITY=yellow, SUSPECTED_IDLE=red,
+                    ACTIVE=green, LOW_ACTIVITY=yellow, NO_ACTIVITY_OBSERVED=yellow, SUSPECTED_IDLE=red,
                     UNKNOWN=yellow | curses.A_DIM, title=cyan | curses.A_BOLD,
                     tab=cyan | curses.A_BOLD | curses.A_UNDERLINE)
     except curses.error:

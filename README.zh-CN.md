@@ -49,7 +49,9 @@ seegpu export --days 7 --format json > usage.json
 seegpu export --days 7 --format csv > usage.csv
 ```
 
-优先 systemd 用户 timer；未启用 linger 的用户 manager 可能随注销停止，本工具不修改管理员设置。系统 cron 可用时可选择 `seegpu schedule install --backend cron`。cron 周期须为整分钟倍数。机器关机期间不会补采。
+完整 `setup.sh` 默认启用自动采集：存在 crontab 时优先用户 cron，以便退出 SSH 后继续运行；否则使用自动调度后端。启用失败时 setup 返回错误，不会报告全部配置成功。只有显式传入 `--no-schedule` 才跳过。
+
+显式执行 `seegpu schedule install` 优先 systemd 用户 timer；未启用 linger 的用户 manager 可能随注销停止，本工具不修改管理员设置。系统 cron 可用时可选择 `seegpu schedule install --backend cron`。cron 周期须为整分钟倍数。机器关机期间不会补采。
 
 `q` 直接退出界面，`h` 查看帮助，`1/3/7` 切换周期，`g` 切换 GPU，`u` 切换用户/进程，Enter 展开用户详情。Tab/翻页键操作表格。支持窄屏、宽屏、8/256 色、黑白与 ASCII：
 
@@ -60,9 +62,9 @@ GPUMONITOR_ASCII=1 seegpu
 
 ## 配置与指标
 
-将 `config.example.json` 复制为 `~/.config/gpumonitor/config.json`。数据库默认 `~/.local/share/gpumonitor/history.db`，尊重 XDG 环境变量，可配置路径、采样时长/间隔/周期和 30 天默认保留时间。`theme.example.json` 可用于独立配置负载颜色阈值，不影响活动或闲置判断。
+将 `config.example.json` 复制为 `~/.config/gpumonitor/config.json`。数据库默认 `~/.local/share/gpumonitor/history.db`，尊重 XDG 环境变量，可配置路径、采样时长/间隔/周期和 30 天默认保留时间。每轮采集写入时自动删除超过 30 天的记录，即使本轮 GPU 采集失败也会执行清理。`theme.example.json` 可用于独立配置负载颜色阈值，不影响活动或闲置判断。
 
-CURRENT 的 ACT/LOW/IDLE/UNK 是进程数量。HISTORY 的 ACTIVE、IDLE、UNK 是用户窗口统计，PUNK 则是 UNKNOWN 进程的窗口观测次数。一个用户有 ACTIVE 和 UNKNOWN 两个进程时，用户 ACTIVE=100%、UNK=0 可以成立，同时 PUNK=1，进程 UNKNOWN 比例为 1/2。
+CURRENT 的 NOACT/ACT/LOW/IDLE/UNK 是进程数量，合计为 N。NOACT 表示本轮明确观测到零活动、尚未达到连续窗口要求；IDLE 为达到条件的疑似闲置，UNK 是未知。选中用户按 Enter 可查看 PID、显存、样本覆盖率和连续零活动窗口数。`r` 只刷新数据库，不能启动采集；数据过旧时在另一个终端运行 `seegpu once` 并检查 `seegpu schedule status`。HISTORY 的 ACTIVE、IDLE、UNK 是用户窗口统计，PUNK 则是 UNKNOWN 进程的窗口观测次数。一个用户有 ACTIVE 和 UNKNOWN 两个进程时，用户 ACTIVE=100%、UNK=0 可以成立，同时 PUNK=1，进程 UNKNOWN 比例为 1/2。
 
 SM 平均值和峰值只来自有效样本，覆盖率是样本覆盖而不是计算时间比例。用户 SM 峰值是各进程峰值的最大值，不能当作用户整体 GPU 利用率。缺失读数保留 N/A，UNKNOWN 不能当成零或空闲。显存平均是“用户被观测到持有显存时”的窗口平均，没看到用户的窗口不补零。
 

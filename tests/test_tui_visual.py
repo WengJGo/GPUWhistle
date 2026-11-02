@@ -116,3 +116,14 @@ def test_ascii_frame_replaces_wide_names_without_shifting_columns():
     frame.flush()
     row = next(call[2] for call in screen.calls if call[0] == 0)
     assert row.isascii() and row.index('NEXT') == 12
+
+
+def test_stale_sample_points_to_collection_not_ui_refresh(rig, monkeypatch):
+    from gpumonitor import tui
+    _, _, _, sample = rig
+    window = sample()
+    monkeypatch.setattr(tui.time, 'time', lambda: window['end'] + 3616)
+    _, freshness = status_bar(window, window['gpus'], 1, None, False, 600, Theme())
+    assert 'Last sample age 3616s' in freshness
+    assert 'STALE' in freshness and 'seegpu once' in freshness and 'schedule status' in freshness
+    assert width(freshness) < 80

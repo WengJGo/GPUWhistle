@@ -26,7 +26,7 @@ for arg in "$@"; do
         --no-schedule) schedule=0 ;;
         --help|-h)
             echo 'Usage: source ./setup.sh [--no-sample] [--no-schedule]'
-            echo 'Installs seegpu, configures shell PATH, samples once and installs a user schedule.'
+            echo 'Installs seegpu, configures shell PATH, samples once and enables automatic collection by default.'
             exit 0 ;;
         *) echo "Unknown setup option: $arg" >&2; exit 2 ;;
     esac
@@ -47,9 +47,15 @@ if [[ $sample == 1 ]]; then
     fi
 fi
 if [[ $schedule == 1 ]]; then
-    if ! "$cli" schedule install; then
-        echo '未能安装定时采集；可稍后运行 seegpu schedule install，或手动运行 seegpu once。' >&2
+    backend=auto
+    if command -v crontab >/dev/null 2>&1; then
+        backend=cron
     fi
+    if ! "$cli" schedule install --backend "$backend"; then
+        echo '软件已安装，但自动采集未启用。请修复调度环境后重新运行 setup.sh；仅安装可使用 --no-schedule。' >&2
+        exit 1
+    fi
+    echo '自动采集已启用；采集周期和历史保留天数使用配置文件（默认 10 分钟、30 天）。'
 fi
 echo '安装配置完成。新终端输入 seegpu；在当前 Bash 中使用 source ./setup.sh 可立即生效。'
 echo '页面快捷键：q 退出，1/3/7 切换历史，g 切换 GPU，u 切换用户/进程。'

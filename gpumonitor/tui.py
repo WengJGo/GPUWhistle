@@ -21,7 +21,7 @@ HELP = [
     ('d', 'Group history by local calendar date'), ('r', 'Refresh SQLite now (no NVML query)'),
     ('Space', 'Pause / resume automatic database refresh'),
 ]
-STATUS = {'ACTIVE': 'ACTIVE', 'LOW_ACTIVITY': 'LOW', 'NO_ACTIVITY_OBSERVED': 'NO EVIDENCE',
+STATUS = {'ACTIVE': 'ACTIVE', 'LOW_ACTIVITY': 'LOW', 'NO_ACTIVITY_OBSERVED': 'NOACT',
           'SUSPECTED_IDLE': 'IDLE?', 'UNKNOWN': 'UNKNOWN'}
 
 
@@ -130,8 +130,8 @@ def usage_panel(window, gpu=None, mode='user', sort='memory', selected=0, detail
     indexes = {g['uuid']: g['index'] for g in window.get('gpus', [])}
     def members(u):
         return [p for p in processes if p['gpu_uuid'] == u['gpu_uuid'] and user_key(p) == u['user_key']]
-    columns = [('USER', max(8, min(22, width - 42)), 'l'), ('GPU', 3, 'r'), ('N', 3, 'r'),
-               ('VRAM GiB', 8, 'r'), ('SM PK', 7, 'r'), ('ACT', 3, 'r'), ('LOW', 3, 'r'),
+    columns = [('USER', max(8, min(22, width - 48)), 'l'), ('GPU', 3, 'r'), ('N', 3, 'r'),
+               ('VRAM GiB', 8, 'r'), ('SM PK', 7, 'r'), ('NOACT', 5, 'r'), ('ACT', 3, 'r'), ('LOW', 3, 'r'),
                ('IDLE', 4, 'r'), ('UNK', 3, 'r')]
     wide_process = width >= 78
     if mode == 'process' or detail:
@@ -149,7 +149,7 @@ def usage_panel(window, gpu=None, mode='user', sort='memory', selected=0, detail
         lines.extend([
             ('ACT=%s LOW=%s IDLE=%s UNK=%s' % (counts['ACTIVE'], counts['LOW_ACTIVITY'],
                 counts['SUSPECTED_IDLE'], counts['UNKNOWN']), 'dim'),
-            ('NO EVIDENCE=%s / N=%s' % (counts['NO_ACTIVITY_OBSERVED'], sum(counts.values())), 'dim'),
+            ('NOACT=%s / N=%s' % (counts['NO_ACTIVITY_OBSERVED'], sum(counts.values())), 'dim'),
         ])
     selection_row = None
     if mode == 'user' and not detail:
@@ -159,8 +159,9 @@ def usage_panel(window, gpu=None, mode='user', sort='memory', selected=0, detail
             sm = [p['sm']['max'] for p in procs if p['sm']['max'] is not None]
             active, low, idle, unknown = (counts[k] for k in ('ACTIVE', 'LOW_ACTIVITY', 'SUSPECTED_IDLE', 'UNKNOWN'))
             row = table(columns, [u['username'], indexes.get(u['gpu_uuid'], '?'), len(procs),
-                number(u['memory']['avg'], scale=2**30), number(max(sm) if sm else None, '%'), active, low, idle, unknown],
+                number(u['memory']['avg'], scale=2**30), number(max(sm) if sm else None, '%'), counts['NO_ACTIVITY_OBSERVED'], active, low, idle, unknown],
                 roles=['', '', '', '', theme.load_role(max(sm) if sm else None),
+                    count_role(counts['NO_ACTIVITY_OBSERVED'], 'NO_ACTIVITY_OBSERVED'),
                     count_role(active, 'ACTIVE'), count_role(low, 'LOW_ACTIVITY'),
                     count_role(idle, 'SUSPECTED_IDLE'), count_role(unknown, 'UNKNOWN')])
             style = ''
@@ -288,7 +289,9 @@ def draw_panel(screen, y, x, height, width, title, lines, offset, focused, color
 def draw_help(screen, colors):
     height, width = screen.getmaxyx()
     box_width = min(78, width-2)
-    rows = ['seegpu  KEYBOARD HELP', 'q always exits; h / ? / Esc closes help.']
+    rows = ['seegpu  KEYBOARD HELP', 'q always exits; h / ? / Esc closes help.',
+            'NOACT=zero activity in sample; IDLE?=repeated evidence.',
+            'UNKNOWN=insufficient evidence, never counted as zero.']
     rows += ['%-18s %s' % pair for pair in HELP]
     rows += ['CURRENT UNK=processes; HISTORY UNK=user windows.',
              'HISTORY PUNK=UNKNOWN process-window observations.',
@@ -319,7 +322,9 @@ def status_bar(window, cards, days, gpu, paused, period, theme):
                   ' %s/%s' % (window['successful_samples'], window['planned_samples']), sep,
                   '%s processes' % len(window['processes']))
     if age > period*2:
-        second = rich(second, sep, ('STALE', 'LOW_ACTIVITY'))
+        second = rich(('Last sample age %.0fs' % age, 'LOW_ACTIVITY'), sep,
+                      ('STALE', 'LOW_ACTIVITY'), sep,
+                      'Run seegpu once; check schedule status')
     if window['errors']:
         second = rich(second, sep, ('CHECK: ' + window['errors'][0], 'LOW_ACTIVITY'))
     return title, second

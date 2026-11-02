@@ -141,3 +141,43 @@ def test_history_process_unknown_visible_without_redefining_user_unknown(mixed_r
                 assert any('Process UNKNOWN: 1/2 (50.0%)' in line for line, _ in details)
                 assert any('Windows with UNKNOWN: 1/1' in line for line, _ in details)
                 assert all(len(line) <= width for line, _ in lines + details)
+
+
+def test_no_activity_count_is_visible_before_suspected_idle(rig, config):
+    from gpumonitor.tui import usage_panel
+    from gpumonitor.tui_theme import width as cell_width
+    clock, _, _, sample = rig
+    window = sample()
+    with Storage(config.database) as db:
+        db.save(window, config)
+    assert window['processes'][0]['status'] == 'NO_ACTIVITY_OBSERVED'
+    assert window['processes'][0]['idle_streak'] == 1
+    for width in (56, 58, 78, 118):
+        rows, _, _ = usage_panel(window, width=width)
+        header = rows[0][0].split()
+        values = rows[1][0].split()
+        assert 'NOACT' in header
+        assert values[-5:] == ['1', '0', '0', '0', '0']
+        assert all(cell_width(line) <= width for line, _ in rows)
+        details, _, _ = usage_panel(window, detail=True, width=width)
+        assert any('NOACT=1 / N=1' in line for line, _ in details)
+        assert any('NOACT' in line and '0.0%' in line for line, _ in details)
+
+
+def test_all_five_current_status_counts_sum_to_process_count(mixed_rig):
+    from copy import deepcopy
+    from gpumonitor.tui import usage_panel
+    from gpumonitor.models import STATUSES
+    _, sample = mixed_rig
+    window = sample()
+    template = window['processes'][0]
+    window['processes'] = []
+    for index, status in enumerate(STATUSES):
+        process = deepcopy(template)
+        process.update(pid=100+index, identity='demo:%s' % index, status=status)
+        window['processes'].append(process)
+    rows, _, _ = usage_panel(window, width=58)
+    values = rows[1][0].split()
+    assert values[2] == '5'
+    assert values[-5:] == ['1'] * 5
+    assert sum(map(int, values[-5:])) == int(values[2])

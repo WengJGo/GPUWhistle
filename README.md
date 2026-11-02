@@ -63,7 +63,9 @@ seegpu schedule status
 seegpu schedule remove
 ```
 
-The scheduler prefers a systemd **user** timer. A user manager without linger may stop after logout. GPUWhistle does not change linger or administrator configuration. If the system cron daemon is available, use:
+Full `setup.sh` enables automatic collection by default and prefers a user **cron** entry when `crontab` is available, so collection continues after SSH logout. Otherwise it uses the automatic scheduler backend. Setup returns an error if schedule installation fails; use `--no-schedule` only to opt out deliberately.
+
+The explicit `seegpu schedule install` command prefers a systemd **user** timer. A user manager without linger may stop after logout. GPUWhistle does not change linger or administrator configuration. If the system cron daemon is available, use:
 
 ```bash
 seegpu schedule install --backend cron
@@ -110,7 +112,7 @@ GPU UUID is stable; an index filter refers to the index recorded in each window.
 
 ### Read the counters correctly
 
-CURRENT `ACT`, `LOW`, `IDLE`, and `UNK` are **process counts**. `N` also includes NO_ACTIVITY_OBSERVED processes. `SM AVG` and `SM PK` summarize valid observed process SM samples; user-level `SM PK` is the maximum process peak, **not** the user's overall GPU utilization. `SM COV` measures valid sample coverage, not time spent working. Older windows without SM-specific coverage display N/A.
+CURRENT `NOACT`, `ACT`, `LOW`, `IDLE`, and `UNK` are **process counts** and sum to `N`. `NOACT` means explicit zero activity in this sample, pending the required consecutive windows; it is separate from suspected `IDLE` and `UNKNOWN`. Select a user and press Enter to see each PID, memory, evidence, and idle streak. `r` only rereads SQLite: if the sample is stale, run `seegpu once` and check `seegpu schedule status` in another shell. `SM AVG` and `SM PK` summarize valid observed process SM samples; user-level `SM PK` is the maximum process peak, **not** the user's overall GPU utilization. `SM COV` measures valid sample coverage, not time spent working. Older windows without SM-specific coverage display N/A.
 
 HISTORY uses different units:
 
@@ -136,7 +138,7 @@ cp config.example.json ~/.config/gpumonitor/config.json
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `duration`, `interval`, `period` | 10, 1, 600 seconds | Require interval ≤ duration ≤ period |
-| `retention_days` | 30 | Prune old summaries on collection writes |
+| `retention_days` | 30 | Delete summaries older than this many days on every collection write, including failed windows |
 | `idle_memory_bytes` | 1073741824 | Observed memory floor for suspected idle |
 | `idle_windows` | 3 | Consecutive valid windows required |
 | `active_threshold` | 10 | Observed engine percentage distinguishing ACTIVE from LOW_ACTIVITY |

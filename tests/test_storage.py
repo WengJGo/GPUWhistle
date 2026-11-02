@@ -26,3 +26,31 @@ def test_wal_reader_sees_new_window(rig, config):
         assert reader.latest() is None
         writer.save(sample(), config)
         assert reader.latest()['complete']
+
+
+def test_retention_boundary_keeps_only_last_thirty_days(rig, config):
+    from copy import deepcopy
+    clock, _, _, sample = rig
+    latest = sample()
+    cutoff = latest['end'] - 30*86400
+    with Storage(config.database) as db:
+        for age in (1, 0, -1):
+            window = deepcopy(latest)
+            window['end'] = cutoff - age
+            window['start'] = window['end'] - config.duration
+            db.save(window, config)
+        db.save(latest, config)
+        ends = [row['end'] for row in db.windows(cutoff-10, clock.time())]
+        assert cutoff-1 not in ends
+        assert ends == [cutoff, cutoff+1, latest['end']]
+
+
+def test_failed_collection_still_prunes_expired_history(rig, config):
+    clock, _, _, sample = rig
+    with Storage(config.database) as db:
+        db.save(sample(), config)
+        clock.sleep(31*86400)
+        failed = dict(start=clock.time(), end=clock.time(), complete=False,
+                      gpus=[], processes=[], users=[], errors=['synthetic failure'])
+        db.save(failed, config)
+        assert db.windows(0, clock.time()) == [failed]

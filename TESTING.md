@@ -24,7 +24,7 @@ These are optional development tools, not runtime dependencies. Preview database
 ```bash
 .venv/bin/python -m pip install setuptools wheel
 .venv/bin/python tools/build_release.py
-.venv/bin/python tools/validate_release.py dist/GPUWhistle-0.2.0-linux.tar.gz
+.venv/bin/python tools/validate_release.py dist/GPUWhistle-0.2.1-linux.tar.gz
 ```
 
 Validation installs from bundled wheels with package-index access disabled, checks extraction checksums, repeated setup, PATH configuration, and configuration preservation in isolated directories. `--sample` is an explicit opt-in to actual read-only GPU sampling; it does not install a scheduler.
