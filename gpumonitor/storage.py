@@ -1,5 +1,6 @@
 import fcntl
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +26,16 @@ class Storage:
     def __init__(self, database):
         path = Path(database)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Reports and diagnostics can create the database before a collector
+        # sets its umask. Create new files privately without changing the
+        # caller's umask or permissions on an existing database.
+        if str(path) != ':memory:':
+            try:
+                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.close(descriptor)
         self.db = sqlite3.connect(str(path), timeout=10)
         self.db.execute('PRAGMA busy_timeout=10000')
         self.db.execute('PRAGMA foreign_keys=ON')

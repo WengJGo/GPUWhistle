@@ -20,7 +20,7 @@ seegpu
 A locally built portable archive can be extracted and installed the same way:
 
 ```bash
-tar -xzf GPUWhistle-0.2.1-linux.tar.gz
+tar -xzf GPUWhistle-0.2.2-linux.tar.gz
 cd GPUWhistle
 source ./setup.sh
 seegpu

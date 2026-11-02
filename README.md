@@ -143,7 +143,7 @@ cp config.example.json ~/.config/gpumonitor/config.json
 | `min_util_coverage` | 0.6 | Minimum explicit sample coverage for inactivity evidence |
 | `database` | empty | Use the XDG data location, or specify a writable path |
 
-Default configuration: `~/.config/gpumonitor/config.json`; database: `~/.local/share/gpumonitor/history.db`. `XDG_CONFIG_HOME` / `XDG_DATA_HOME` are respected. Custom configuration goes **before** the subcommand: `seegpu --config ./config.json once`. No per-second raw samples are retained. SQLite uses WAL, transactions, a busy timeout, and a collection lock. Deleted database pages are reused; file size may not shrink immediately.
+Default configuration: `~/.config/gpumonitor/config.json`; database: `~/.local/share/gpumonitor/history.db`. `XDG_CONFIG_HOME` / `XDG_DATA_HOME` are respected. Custom configuration goes **before** the subcommand: `seegpu --config ./config.json once`. No per-second raw samples are retained. New database files are created with owner-only permissions (0600). Existing database permissions are preserved. SQLite uses WAL, transactions, a busy timeout, and a collection lock. Deleted database pages are reused; file size may not shrink immediately.
 
 Optional UI theme: copy `theme.example.json` to `~/.config/gpumonitor/theme.json`. GPU color boundaries default to `[30, 80]`, VRAM to `[50, 80]`, independently configurable. Theme thresholds affect display only. `GPUMONITOR_THEME` selects another theme file.
 
