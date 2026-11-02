@@ -6,7 +6,7 @@
 
 GPUWhistle 是面向 Linux 共享 NVIDIA GPU 的轻量、只读巡检工具：按用户查看显存和进程、分析进程活动证据、发现疑似闲置显存，保留最近 1/3/7 天的抽样历史。使用 curses 和本地 SQLite，无 Web、Docker 或额外数据库服务。
 
-![合成示例数据的终端界面](docs/tui-snapshots/eight-gpu-wide.png)
+![合成示例数据的终端界面](docs/screenshot.png)
 
 图片来自真实 curses 输出的渲染，全部数据均为虚构示例，不是生产服务器记录。完整参数、指标定义与英文说明见 [README](README.md)。
 
@@ -78,4 +78,4 @@ MIG 仅检测物理设备能力，不展开实例，不支持的指标和有歧�
 
 `./uninstall.sh` 删除本项目管理的环境、入口、PATH 块和任务，保留源码、用户配置与历史数据。自定义前缀安装时卸载须用相同 GPUMONITOR_PREFIX。
 
-原创代码采用 [MIT](LICENSE)，Copyright (c) 2026 WenJGo。第三方依赖及界面参考说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；测试和示例生成见 [TESTING.md](TESTING.md)。
+原创代码采用 [MIT](LICENSE)，Copyright (c) 2026 WenJGo。第三方依赖及界面参考说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。测试与打包命令见 [README](README.md#development)。

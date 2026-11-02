@@ -27,10 +27,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix='gpumonitor-release-') as temporary:
         package = Path(temporary) / 'GPUWhistle'
         package.mkdir()
-        for name in ('README.md', 'README.zh-CN.md', 'QUICKSTART.md', 'TESTING.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'pyproject.toml',
+        for name in ('README.md', 'README.zh-CN.md', 'QUICKSTART.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'pyproject.toml',
                      'requirements.txt', 'config.example.json', 'theme.example.json', 'setup.sh', 'install.sh', 'uninstall.sh'):
             shutil.copy2(ROOT / name, package / name)
-        for name in ('gpumonitor', 'packaging', 'tests', 'tools', 'docs', 'licenses'):
+        for name in ('gpumonitor', 'packaging', 'docs', 'licenses'):
             shutil.copytree(ROOT / name, package / name,
                             ignore=shutil.ignore_patterns('__pycache__', '.pytest_cache', '*.pyc', '*.ansi', '*.txt', '*.log'))
         (package / 'wheelhouse').mkdir()

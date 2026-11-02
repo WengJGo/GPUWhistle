@@ -6,11 +6,11 @@
 
 GPUWhistle is a lightweight, read-only NVIDIA GPU auditing tool for shared Linux servers. See who holds GPU memory, inspect process activity evidence, and review sampled usage over the last 1, 3, or 7 days—all in a curses terminal UI backed by local SQLite.
 
-[中文说明](README.zh-CN.md) · [Quick start](QUICKSTART.md) · [Tests](TESTING.md) · [MIT license](LICENSE)
+[中文说明](README.zh-CN.md) · [Quick start](QUICKSTART.md) · [MIT license](LICENSE)
 
-![GPUWhistle eight-GPU terminal UI with synthetic example data](docs/tui-snapshots/eight-gpu-wide.png)
+![GPUWhistle eight-GPU terminal UI with synthetic example data](docs/screenshot.png)
 
-*Real curses terminal output, rendered with synthetic example data. These images contain no production monitoring records.*
+*Terminal preview with synthetic example data.*
 
 ## What it does
 
@@ -94,8 +94,6 @@ NO_COLOR=1 seegpu
 GPUMONITOR_ASCII=1 seegpu
 ```
 
-More [synthetic terminal previews](docs/tui-snapshots/README.md): [single-GPU detail](docs/tui-snapshots/single-gpu-detail.png), [7-day history](docs/tui-snapshots/history-7d.png), [80 columns](docs/tui-snapshots/compact-80.png).
-
 ## Reports and exports
 
 ```bash
@@ -167,8 +165,22 @@ MIG is detected but instances are not expanded. Unsupported utilization and ambi
 
 Only managed entry points, virtual environment, PATH blocks, and scheduled jobs are removed. Source, user configuration, and historical data are retained. For a custom `GPUMONITOR_PREFIX`, use the same prefix for installation and removal.
 
-## Development and licensing
+## Development
 
-See [TESTING.md](TESTING.md) for GPU-free tests, portable archive checks, and reproducible synthetic previews. New features should preserve the distinction between observed activity, unknown data, and sampling coverage.
+Run the software tests on Linux without a GPU:
 
-Original GPUWhistle code is [MIT licensed](LICENSE), copyright 2026 WenJGo. Dependencies retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The UI draws inspiration from [nvitop](https://github.com/XuehaiPan/nvitop), nvtop, and htop; their implementation code is not copied or vendored here.
+```bash
+python -m pip install -e '.[test]'
+python -m pytest -q
+```
+
+Build a portable archive with runtime wheels:
+
+```bash
+python -m pip install setuptools wheel
+python tools/build_release.py
+```
+
+## License
+
+[MIT](LICENSE), copyright 2026 WenJGo. Dependency licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
