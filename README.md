@@ -79,6 +79,8 @@ Cron checks once per minute and samples only when the current configured period 
 | --- | --- |
 | `q` | Quit immediately |
 | `h` / `?` | Keyboard help |
+| `t` | Toggle historical idle occupancy ranking; default last 30 days |
+| `0` (ranking) | All retained history, up to 30 days |
 | `1` / `3` / `7` | Last 24 / 72 / 168 hours |
 | `g`, Left / Right; `a` | Cycle GPUs; show all GPUs |
 | `u` | Users / processes |
@@ -104,9 +106,29 @@ seegpu report --user alice --gpu 0 --days 7
 seegpu report --days 7 --daily
 seegpu export --days 7 --format csv > usage.csv
 seegpu export --days 7 --format json > usage.json
+seegpu idle
+seegpu idle --days 7 --user alice --gpu 0
+seegpu idle --days 30 --format csv > idle.csv
+seegpu idle --format json > idle.json
 ```
 
 GPU UUID is stable; an index filter refers to the index recorded in each window. JSON exports also include GPU-wide window power trends. CSV memory values are bytes, timestamps are Unix seconds, and ratios are 0..1. A seven-day query only reports observations actually collected.
+
+### Historical idle occupancy ranking
+
+Press **t** to see every user/GPU observed in the selected range, including users whose processes have exited. Rows sort by estimated zero-activity occupancy, descending. **0** selects the last 30 days; **1/3/7** select shorter ranges. GPU filters, arrow/page keys, Enter for evidence, refresh/pause, and q remain available; t or Esc returns to the dashboard. The dashboard's HISTORY counters are unchanged.
+
+| Field | Meaning |
+| --- | --- |
+| ZERO~ | Estimated time: one configured period (default 600 s) per reliable zero-activity observation |
+| SAMP | Actual zero-activity window time (default about 10 s per observation) |
+| HELD~ | Period-weighted ownership estimate for all observed states, including UNKNOWN |
+| GiB | Average combined memory of qualifying zero-activity processes, conditional on those windows |
+| PUNK | UNKNOWN process-window observations, independently counted |
+
+Each estimate assigns the period **ending at** its observation, clips it to the requested range, and counts overlapping intervals once per user/GPU. Thus duplicate/manual windows and parallel processes do not inflate elapsed time. Missing observations do not add periods; there is no extension from the last observation to now. Current sampling-period configuration is used for historical estimates. These are sampling assumptions, **not measured continuous idle time**.
+
+Only complete windows with reliable NOACT or SUSPECTED_IDLE processes meeting the configured minimum memory floor contribute to ZERO~. ACTIVE, LOW_ACTIVITY, UNKNOWN and missing memory add no zero time. A user may have both idle and active processes: the qualifying processes contribute, without claiming the entire GPU or user is idle. Enter shows such mixed windows, the latest observed state counts (possibly historical), last seen/last zero times, actual owner-window coverage of the requested range, and evidence counts. Rows with no zero evidence still appear with zero estimates and N/A zero-memory. Default 30-day selection includes only data still retained; earlier deleted data cannot be reconstructed.
 
 ### Read the counters correctly
 

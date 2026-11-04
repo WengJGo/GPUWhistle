@@ -62,7 +62,11 @@ def test_terminal_fallbacks_and_repeated_resize(config, rig, tmp_path, terminal,
     _, _, backend, sample = rig
     backend.cards = {'GPU-' + str(i): [10+i] for i in range(8)}
     with Storage(config.database) as db:
-        db.save(sample(), config)
+        w = sample()
+        shift = time.time() - w['end']
+        w['start'] += shift
+        w['end'] += shift
+        db.save(w, config)
     path = tmp_path / 'resize.json'
     path.write_text(json.dumps({'database': config.database}))
     master, slave = pty.openpty()
@@ -74,7 +78,7 @@ def test_terminal_fallbacks_and_repeated_resize(config, rig, tmp_path, terminal,
     child = subprocess.Popen([sys.executable, '-m', 'gpumonitor', '--config', str(path)],
         stdin=slave, stdout=slave, stderr=slave, env=env)
     os.close(slave)
-    output, index = bytearray(), 0
+    output, index, stats_entered = bytearray(), 0, False
     sizes = [(100,30), (120,35), (160,45), (40,12), (80,24)]
     next_change, deadline = time.monotonic()+.2, time.monotonic()+5
     try:
@@ -85,7 +89,10 @@ def test_terminal_fallbacks_and_repeated_resize(config, rig, tmp_path, terminal,
                     output.extend(os.read(master, 65536))
                 except OSError:
                     break
-            if b'GPUWhistle' in output and time.monotonic() >= next_change:
+            if b'GPUWhistle' in output and not stats_entered:
+                os.write(master, b't')
+                stats_entered = True
+            if b'IDLE OCCUPANCY' in output and time.monotonic() >= next_change:
                 if index < len(sizes):
                     columns, rows = sizes[index]
                     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
@@ -93,11 +100,12 @@ def test_terminal_fallbacks_and_repeated_resize(config, rig, tmp_path, terminal,
                     index += 1
                     next_change = time.monotonic()+.12
                 else:
-                    os.write(master, b'g\n7rhhq')
+                    os.write(master, b'\n\n703gatt7rhhq')
                     next_change = deadline+1
         child.wait(timeout=3)
         assert child.returncode == 0 and index == len(sizes), output.decode(errors='replace')
         assert b'Traceback' not in output and b'CURRENT' in output and b'HISTORY' in output
+        assert b'IDLE OCCUPANCY' in output and b'ZERO~' in output and b'HELD~' in output
         if 'GPUMONITOR_ASCII' in extra:
             assert all(byte < 128 for byte in output)
         if 'NO_COLOR' in extra or terminal == 'vt100':

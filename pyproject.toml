@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gpuwhistle"
-version = "0.2.2"
+version = "0.3.0"
 description = "GPUWhistle: sampled NVIDIA GPU activity and Linux user auditing"
 readme = "README.md"
 authors = [{name = "WenJGo"}]

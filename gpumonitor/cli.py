@@ -13,6 +13,7 @@ from . import __version__
 from .config import load
 from .storage import Storage, collection_lock
 from .analytics import report
+from .idle_stats import idle_report
 
 
 def parser():
@@ -36,6 +37,11 @@ def parser():
     schedule = sub.add_parser('schedule')
     schedule.add_argument('action', choices=('install', 'status', 'remove'))
     schedule.add_argument('--backend', choices=('auto', 'systemd', 'cron'), default='auto')
+    idle = sub.add_parser('idle', help='Rank all historical owners by estimated zero-activity occupancy')
+    idle.add_argument('--days', type=int, choices=(1, 3, 7, 30), default=30)
+    idle.add_argument('--user')
+    idle.add_argument('--gpu', help='current index or stable UUID')
+    idle.add_argument('--format', choices=('text', 'json', 'csv'), default='text')
     return p
 
 
@@ -57,6 +63,18 @@ def text_report(result):
         lines.append('No observations. Run: gpumonitor once')
     lines.append('UNKNOWN = user windows; PUNK = UNKNOWN process-window observations, including active user windows.')
     lines.append('Sampled observations cannot establish activity between windows. Power is GPU-wide.')
+    return '\n'.join(lines)
+
+
+def text_idle_report(result):
+    lines = ['GPUWhistle | historical idle occupancy | last %sd | descending ZERO~' % result['days'],
+             'USER             GPU    ZERO~ h   SAMP s   HELD~ h  ZERO GiB  PUNK',
+             'ZERO~/HELD~ = period-weighted estimates; SAMP = measured zero time.']
+    for r in result['rows']:
+        lines.append('%-16s %3s %10.2f %8.1f %9.2f %9s %5s' % (r['username'][:16], r['gpu_index'],
+            r['zero_estimated_seconds']/3600, r['zero_sample_seconds'], r['held_estimated_seconds']/3600,
+            number(r['zero_memory_avg'], scale=2**30), r['unknown_process_windows']))
+    lines.append(result['note'])
     return '\n'.join(lines)
 
 
@@ -152,6 +170,20 @@ def main(argv=None):
                     print('CHECK: ' + error, file=sys.stderr)
                 return 0 if window['complete'] else 1
         with Storage(config.database) as db:
+            if args.command == 'idle':
+                result = idle_report(db, config, args.days, args.user, args.gpu)
+                if args.format == 'text':
+                    print(text_idle_report(result))
+                elif args.format == 'json':
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                else:
+                    fields = [k for k in result['rows'][0] if k != 'latest_counts'] if result['rows'] else [
+                        'username', 'gpu_index', 'zero_estimated_seconds', 'zero_sample_seconds', 'held_estimated_seconds',
+                        'observed_seconds', 'sample_coverage', 'unknown_process_windows']
+                    writer = csv.DictWriter(sys.stdout, fieldnames=fields, extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(result['rows'])
+                return 0
             if args.command in ('report', 'export'):
                 result = report(db, config, args.days, args.user, args.gpu, args.daily)
                 if args.command == 'report':

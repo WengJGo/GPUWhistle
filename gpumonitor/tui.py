@@ -4,6 +4,7 @@ import time
 from collections import Counter
 from datetime import datetime
 from .analytics import report
+from .idle_stats import idle_report
 from .cli import number
 from .models import user_key
 from .tui_theme import Theme, fit, pad, rich, width as cell_length, colors as theme_colors
@@ -12,6 +13,8 @@ from .tui_render import Frame, layout
 HELP = [
     ('q', 'Quit immediately'), ('h / ?', 'Show or close this help'),
     ('1 / 3 / 7', 'History: last 24 / 72 / 168 hours'),
+    ('t', 'Toggle historical idle ranking (default: all 30 days)'),
+    ('0 (statistics)', 'Include all retained history, last 30 days'),
     ('g / Left / Right', 'Cycle GPU selection; a selects all GPUs'),
     ('u', 'Switch users / processes'), ('n / m / i', 'Sort by name / VRAM / idle streak'),
     ('s', 'Cycle sort order'), ('Tab', 'Focus current usage / history'),
@@ -23,6 +26,60 @@ HELP = [
 ]
 STATUS = {'ACTIVE': 'ACTIVE', 'LOW_ACTIVITY': 'LOW', 'NO_ACTIVITY_OBSERVED': 'NOACT',
           'SUSPECTED_IDLE': 'IDLE?', 'UNKNOWN': 'UNKNOWN'}
+
+
+def duration(seconds):
+    if seconds is None:
+        return 'N/A'
+    if seconds < 60:
+        return '%.0fs' % seconds
+    if seconds < 3600:
+        return '%.1fm' % (seconds / 60)
+    return '%.1fh' % (seconds / 3600)
+
+
+def idle_panel(result, selected=0, detail=False, width=78):
+    """Historical rows are independent of the latest ownership snapshot."""
+    columns = [('USER', max(8, min(20, width - 49)), 'l'), ('GPU', 3, 'r'),
+               ('ZERO~', 8, 'r'), ('SAMP', 7, 'r'), ('HELD~', 8, 'r'),
+               ('GiB', 6, 'r'), ('PUNK', 5, 'r')]
+    if width >= 90:
+        columns.append(('LAST SEEN', 14, 'r'))
+    lines = [(table(columns, [c[0] for c in columns]), 'columns')]
+    selection_row = None
+    for index, row in enumerate(result['rows']):
+        values = [row['username'], row['gpu_index'], duration(row['zero_estimated_seconds']),
+                  duration(row['zero_sample_seconds']), duration(row['held_estimated_seconds']),
+                  number(row['zero_memory_avg'], scale=2**30), row['unknown_process_windows']]
+        roles = ['', '', 'SUSPECTED_IDLE' if row['zero_windows'] else 'dim', 'dim', '', '',
+                 count_role(row['unknown_process_windows'], 'UNKNOWN')]
+        if width >= 90:
+            values.append(stamp(row['last_seen'])[:14])
+            roles.append('dim')
+        if index == selected:
+            selection_row = len(lines)
+        lines.append((fit(table(columns, values, roles), width), 'selected' if index == selected else ''))
+        if detail and index == selected:
+            counts = row['latest_counts']
+            details = [
+                'Last observed: %s (historical ownership; may have exited)' % stamp(row['last_seen']),
+                'Last zero: %s | zero windows %s / observed %s' % (
+                    stamp(row['last_zero']) if row['last_zero'] is not None else 'N/A', row['zero_windows'], row['observed_windows']),
+                'Sampled owner time %s | range coverage %.2f%%' % (duration(row['observed_seconds']), row['sample_coverage'] * 100),
+                'IDLE windows %s | mixed active+zero windows %s' % (row['idle_windows'], row['mixed_active_windows']),
+                'Last counts ACT=%s LOW=%s NOACT=%s IDLE=%s UNK=%s' % tuple(counts[k] for k in (
+                    'ACTIVE', 'LOW_ACTIVITY', 'NO_ACTIVITY_OBSERVED', 'SUSPECTED_IDLE', 'UNKNOWN')),
+                'PUNK %s / %s process-windows; UNKNOWN adds no zero time' % (row['unknown_process_windows'], row['process_windows']),
+                'GiB = avg memory of zero-activity processes in qualifying samples',
+                'Minimum process VRAM %.1f GiB; NOACT + IDLE qualify' % (result['idle_memory_bytes'] / 2**30),
+                'ZERO~/HELD~: one %.0fs period per observation, overlaps once' % result['period_seconds'],
+                'Periods end at observation, clipped to range; gaps not filled',
+                'Estimates cannot prove continuous inactivity between samples',
+            ]
+            lines += [(fit('  ' + line, width), 'dim') for line in details]
+    if not result['rows']:
+        lines.append(('No historical owners in this range.', 'dim'))
+    return lines, selection_row
 
 
 def stamp(value):
@@ -310,7 +367,7 @@ def status_bar(window, cards, days, gpu, paused, period, theme):
     updated = datetime.fromtimestamp(window['end']).strftime('%H:%M:%S') if window else 'N/A'
     title = rich(('GPUWhistle', 'title'), ('  seegpu', 'dim'), sep, device, sep, 'Updated ',
                  (updated, '' if window else 'na'), sep)
-    for value in (1, 3, 7):
+    for value in ((1, 3, 7, 30) if days == 30 else (1, 3, 7)):
         title = rich(title, ('%sd' % value, 'tab' if days == value else 'dim'), ' ')
     if paused:
         title = rich(title, ('  PAUSED', 'LOW_ACTIVITY'))
@@ -342,48 +399,69 @@ def _loop(screen, storage, config):
     frame = Frame(screen, colors, ascii=theme.ascii)
     days, gpu, mode, sort, selected = 1, None, 'user', 'memory', 0
     detail = daily = help_open = paused = False
+    stats_open = stats_detail = False
+    stats_days, stats_selected, stats_offset, ranking = 30, 0, 0, None
     focus, offsets, refreshed, window, history = 0, [0, 0], 0, None, None
     while True:
         if history is None or refreshed == 0 or (not paused and time.monotonic() - refreshed >= 5):
             window = storage.latest()
             history = report(storage, config, days, gpu=gpu, daily=daily)
+            if stats_open:
+                ranking = idle_report(storage, config, stats_days, gpu=gpu)
             refreshed = time.monotonic()
         height, width = screen.getmaxyx()
         frame.begin()
-        cards = (window or {}).get('gpus', [])
+        cards = ranking['gpus'] if stats_open else (window or {}).get('gpus', [])
         users = ordered_users(window or {}, gpu, sort)
         selected = min(selected, max(0, len(users)-1))
-        title, fresh = status_bar(window, cards, days, gpu, paused, config.period, theme)
+        title, fresh = status_bar(window, cards, stats_days if stats_open else days, gpu, paused, config.period, theme)
         put(frame, 0, 0, title, width-1)
         put(frame, 1, 0, fresh, width-1)
-        overview = gpu_panel(window or {}, gpu, width-1, compact=width < 120, theme=theme)
-        geometry = layout(width, height, len(overview))
-        if len(overview) > geometry.overview_limit:
-            overview = overview[:max(1, geometry.overview_limit-1)] + [('More GPUs: g / Left / Right selects a device', 'dim')]
-        put(frame, 2, 0, 'GPU OVERVIEW', width-1, colors.get('section', curses.A_BOLD))
-        for i, (line, style) in enumerate(overview):
-            put(frame, 3+i, 0, line, width-1, colors.get(style, 0))
-        start = geometry.start
-        panel_width = geometry.panel_width
-        usage, chosen, selection_row = usage_panel(window or {}, gpu, mode, sort, selected, detail, panel_width, theme)
-        memory_totals = {g['uuid']: g['memory_total'] for g in cards}
-        hist = history_panel(history, chosen, detail, panel_width, theme, memory_totals)
-        current_title = 'CURRENT / %s / %s' % ('DETAIL' if detail else mode.upper(), sort)
-        history_title = 'HISTORY %sd  %s/%s complete%s' % (days, history['completed_windows'], history['attempted_windows'], '  DAILY' if daily else '')
-        panel_height = geometry.current_height
-        if focus == 0 and mode == 'user' and not detail and selection_row is not None:
-            body_height = max(1, panel_height-2)
-            row = selection_row-1
-            if row < offsets[0]:
-                offsets[0] = row
-            elif row >= offsets[0]+body_height:
-                offsets[0] = row-body_height+1
-        offsets[0], page0 = draw_panel(frame, start, 0, panel_height, panel_width, current_title,
-            usage, offsets[0], focus == 0, colors)
-        hist_y, hist_x, hist_height = geometry.history_y, geometry.history_x, geometry.history_height
-        offsets[1], page1 = draw_panel(frame, hist_y, hist_x, hist_height, panel_width, history_title,
-            hist, offsets[1], focus == 1, colors)
-        put(frame, height-1, 0, '1/3/7 History   g GPU   u User   Enter Detail   h Help   q Quit', width-1, colors.get('dim', 0))
+        if stats_open:
+            stats_selected = min(stats_selected, max(0, len(ranking['rows'])-1))
+            stat_lines, stat_row = idle_panel(ranking, stats_selected, stats_detail, width-2)
+            put(frame, 2, 0, 'ZERO~: zero observations x sampling period; SAMP: measured zero time', width-1, colors.get('dim', 0))
+            put(frame, 3, 0, 'Historical owners included after exit. UNKNOWN is never zero activity.', width-1, colors.get('dim', 0))
+            body = max(1, height-8)
+            if stat_row is not None and not stats_detail:
+                stats_offset = min(stats_offset, stat_row-1)
+                if stat_row-1 >= stats_offset+body:
+                    stats_offset = stat_row-body
+            stats_offset, stats_page = draw_panel(frame, 5, 0, height-6, width-2,
+                'IDLE OCCUPANCY / %sd / descending ZERO~ / %s historical owners' % (stats_days, len(ranking['rows'])),
+                stat_lines, stats_offset, True, colors)
+            put(frame, height-1, 0, 't Back 0/1/3/7 Range g GPU Enter Evidence h Help q Quit', width-1, colors.get('dim', 0))
+        else:
+            overview = gpu_panel(window or {}, gpu, width-1, compact=width < 120, theme=theme)
+            geometry = layout(width, height, len(overview))
+            if len(overview) > geometry.overview_limit:
+                overview = overview[:max(1, geometry.overview_limit-1)] + [('More GPUs: g / Left / Right selects a device', 'dim')]
+            put(frame, 2, 0, 'GPU OVERVIEW', width-1, colors.get('section', curses.A_BOLD))
+            for i, (line, style) in enumerate(overview):
+                put(frame, 3+i, 0, line, width-1, colors.get(style, 0))
+            start = geometry.start
+            panel_width = geometry.panel_width
+            usage, chosen, selection_row = usage_panel(window or {}, gpu, mode, sort, selected, detail, panel_width, theme)
+            memory_totals = {g['uuid']: g['memory_total'] for g in cards}
+            hist = history_panel(history, chosen, detail, panel_width, theme, memory_totals)
+            current_title = 'CURRENT / %s / %s' % ('DETAIL' if detail else mode.upper(), sort)
+            history_title = 'HISTORY %sd  %s/%s complete%s' % (days, history['completed_windows'], history['attempted_windows'], '  DAILY' if daily else '')
+            panel_height = geometry.current_height
+            if focus == 0 and mode == 'user' and not detail and selection_row is not None:
+                body_height = max(1, panel_height-2)
+                row = selection_row-1
+                if row < offsets[0]:
+                    offsets[0] = row
+                elif row >= offsets[0]+body_height:
+                    offsets[0] = row-body_height+1
+            offsets[0], page0 = draw_panel(frame, start, 0, panel_height, panel_width, current_title,
+                usage, offsets[0], focus == 0, colors)
+            hist_y, hist_x, hist_height = geometry.history_y, geometry.history_x, geometry.history_height
+            offsets[1], page1 = draw_panel(frame, hist_y, hist_x, hist_height, panel_width, history_title,
+                hist, offsets[1], focus == 1, colors)
+            footer = ('t Stats  1/3/7 History  g GPU  u User  Enter Detail  h Help  q Quit' if width >= 70
+                      else 't Stats 1/3/7 History g GPU Enter Detail h Help q Quit')
+            put(frame, height-1, 0, footer, width-1, colors.get('dim', 0))
         if width < 60 or height < 18:
             frame.begin()
             put(frame, 0, 0, 'GPUWhistle: need at least 60x18. q quits.', width-1)
@@ -399,6 +477,11 @@ def _loop(screen, storage, config):
         if key == 27:
             if help_open:
                 help_open = False
+            elif stats_open:
+                if stats_detail:
+                    stats_detail, stats_offset = False, 0
+                else:
+                    stats_open = False
             elif detail:
                 detail = False
             else:
@@ -406,13 +489,42 @@ def _loop(screen, storage, config):
             continue
         if help_open:
             continue
+        if key == ord('t'):
+            stats_open, refreshed, ranking = not stats_open, 0, None
+            stats_offset = 0
+            continue
+        if stats_open and key not in (ord('1'), ord('3'), ord('7'), ord('g'), curses.KEY_LEFT, curses.KEY_RIGHT, ord('a'), ord('r'), ord(' ')):
+            if key == ord('0'):
+                stats_days, stats_selected, stats_offset, refreshed = 30, 0, 0, 0
+            elif key in (curses.KEY_ENTER, 10, 13):
+                stats_detail, stats_offset = not stats_detail, max(0, (stat_row or 1)-1)
+            elif key in (curses.KEY_DOWN, curses.KEY_UP):
+                delta = 1 if key == curses.KEY_DOWN else -1
+                if stats_detail:
+                    stats_offset = max(0, stats_offset+delta)
+                else:
+                    stats_selected = max(0, min(stats_selected+delta, len(ranking['rows'])-1))
+            elif key in (curses.KEY_NPAGE, curses.KEY_PPAGE, curses.KEY_HOME, curses.KEY_END):
+                if stats_detail:
+                    stats_offset = (0 if key == curses.KEY_HOME else max(0, len(stat_lines)-stats_page-1)
+                        if key == curses.KEY_END else max(0, stats_offset+(stats_page if key == curses.KEY_NPAGE else -stats_page)))
+                else:
+                    stats_selected = (0 if key == curses.KEY_HOME else max(0, len(ranking['rows'])-1)
+                        if key == curses.KEY_END else max(0, min(len(ranking['rows'])-1,
+                            stats_selected+(stats_page if key == curses.KEY_NPAGE else -stats_page))))
+            continue
         if key in (ord('1'), ord('3'), ord('7')):
-            days, refreshed, offsets = int(chr(key)), 0, [0, 0]
+            if stats_open:
+                stats_days, stats_selected, stats_offset = int(chr(key)), 0, 0
+            else:
+                days = int(chr(key))
+            refreshed, offsets = 0, [0, 0]
         elif key in (ord('g'), curses.KEY_LEFT, curses.KEY_RIGHT, ord('a')):
             devices = [None] + [g['uuid'] for g in cards]
             position = devices.index(gpu) if gpu in devices else 0
             gpu = None if key == ord('a') else devices[(position + (-1 if key == curses.KEY_LEFT else 1)) % len(devices)]
             refreshed, selected, offsets = 0, 0, [0, 0]
+            stats_selected, stats_offset = 0, 0
         elif key == ord('u'):
             mode, offsets[0] = ('process' if mode == 'user' else 'user'), 0
         elif key in (ord('n'), ord('m'), ord('i'), ord('s')):
