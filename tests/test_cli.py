@@ -1,4 +1,5 @@
 import json
+import pytest
 from gpumonitor.cli import main
 from gpumonitor.storage import Storage
 
@@ -70,3 +71,21 @@ def test_mixed_unknown_metrics_in_text_csv_and_json(config, tmp_path, mixed_rig,
     row = next(csv.DictReader(io.StringIO(capsys.readouterr().out)))
     assert row['unknown_windows'] == '0' and row['unknown_process_windows'] == '1'
     assert row['process_windows'] == '2' and row['windows_with_unknown_processes'] == '1'
+
+
+@pytest.mark.parametrize('days', [15, 30])
+def test_long_history_ranges_report_export_and_idle(config, tmp_path, rig, capsys, monkeypatch, days):
+    clock, _, _, sample = rig
+    with Storage(config.database) as db:
+        db.save(sample(), config)
+    monkeypatch.setattr('gpumonitor.analytics.time.time', clock.time)
+    args = config_args(config, tmp_path)
+    assert main(args+['report', '--days', str(days)]) == 0
+    assert 'last %s hours' % (days*24) in capsys.readouterr().out
+    for command in ('export', 'idle'):
+        assert main(args+[command, '--days', str(days), '--format', 'json']) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result['days'] == days and result['attempted_windows'] == 1
+        assert len(result['rows']) == 1
+        assert main(args+[command, '--days', str(days), '--format', 'csv']) == 0
+        assert 'user1' in capsys.readouterr().out

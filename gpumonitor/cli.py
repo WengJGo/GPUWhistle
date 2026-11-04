@@ -12,7 +12,7 @@ import time
 from . import __version__
 from .config import load
 from .storage import Storage, collection_lock
-from .analytics import report
+from .analytics import HISTORY_DAYS, report
 from .idle_stats import idle_report
 
 
@@ -28,7 +28,7 @@ def parser():
     once.add_argument('--scheduled', action='store_true', help=argparse.SUPPRESS)
     for name in ('report', 'export'):
         cmd = sub.add_parser(name)
-        cmd.add_argument('--days', type=int, choices=(1, 3, 7), default=1)
+        cmd.add_argument('--days', type=int, choices=HISTORY_DAYS, default=1)
         cmd.add_argument('--user')
         cmd.add_argument('--gpu', help='current index or stable UUID')
         cmd.add_argument('--daily', action='store_true')
@@ -38,7 +38,7 @@ def parser():
     schedule.add_argument('action', choices=('install', 'status', 'remove'))
     schedule.add_argument('--backend', choices=('auto', 'systemd', 'cron'), default='auto')
     idle = sub.add_parser('idle', help='Rank all historical owners by estimated zero-activity occupancy')
-    idle.add_argument('--days', type=int, choices=(1, 3, 7, 30), default=30)
+    idle.add_argument('--days', type=int, choices=HISTORY_DAYS, default=30)
     idle.add_argument('--user')
     idle.add_argument('--gpu', help='current index or stable UUID')
     idle.add_argument('--format', choices=('text', 'json', 'csv'), default='text')

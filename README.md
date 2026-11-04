@@ -80,7 +80,7 @@ Cron checks once per minute and samples only when the current configured period 
 | `q` | Quit immediately |
 | `h` / `?` | Keyboard help |
 | `t` | Toggle historical idle occupancy ranking; default last 30 days |
-| `0` (ranking) | All retained history, up to 30 days |
+| `5` / `0` | Last 15 / 30 days, in both HISTORY and idle ranking |
 | `1` / `3` / `7` | Last 24 / 72 / 168 hours |
 | `g`, Left / Right; `a` | Cycle GPUs; show all GPUs |
 | `u` | Users / processes |
@@ -102,12 +102,16 @@ GPUMONITOR_ASCII=1 seegpu
 seegpu report --days 1
 seegpu report --days 3
 seegpu report --days 7
+seegpu report --days 15
+seegpu report --days 30
 seegpu report --user alice --gpu 0 --days 7
 seegpu report --days 7 --daily
 seegpu export --days 7 --format csv > usage.csv
 seegpu export --days 7 --format json > usage.json
 seegpu idle
 seegpu idle --days 7 --user alice --gpu 0
+seegpu export --days 30 --format csv > usage-30d.csv
+seegpu idle --days 15 --format csv > idle-15d.csv
 seegpu idle --days 30 --format csv > idle.csv
 seegpu idle --format json > idle.json
 ```
@@ -116,7 +120,7 @@ GPU UUID is stable; an index filter refers to the index recorded in each window.
 
 ### Historical idle occupancy ranking
 
-Press **t** to see every user/GPU observed in the selected range, including users whose processes have exited. Rows sort by estimated zero-activity occupancy, descending. **0** selects the last 30 days; **1/3/7** select shorter ranges. GPU filters, arrow/page keys, Enter for evidence, refresh/pause, and q remain available; t or Esc returns to the dashboard. The dashboard's HISTORY counters are unchanged.
+Press **t** to see every user/GPU observed in the selected range, including users whose processes have exited. Rows sort by estimated zero-activity occupancy, descending. **5** selects 15 days, **0** selects 30 days, and **1/3/7** select shorter ranges. The same keys work in the dashboard HISTORY. GPU filters, arrow/page keys, Enter for evidence, refresh/pause, and q remain available; t or Esc returns to the dashboard. The dashboard's HISTORY counters are unchanged.
 
 | Field | Meaning |
 | --- | --- |

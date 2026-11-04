@@ -4,7 +4,7 @@
 
 **显存被占用，不代表 GPU 正在工作。**
 
-GPUWhistle 是面向 Linux 共享 NVIDIA GPU 的轻量、只读巡检工具：按用户查看显存和进程、分析进程活动证据、发现疑似闲置显存，保留最近 1/3/7 天的抽样历史。使用 curses 和本地 SQLite，无 Web、Docker 或额外数据库服务。
+GPUWhistle 是面向 Linux 共享 NVIDIA GPU 的轻量、只读巡检工具：按用户查看显存和进程、分析进程活动证据、发现疑似闲置显存，保留最近 1/3/7/15/30 天的抽样历史。使用 curses 和本地 SQLite，无 Web、Docker 或额外数据库服务。
 
 ![合成示例数据的终端界面](docs/screenshot.png)
 
@@ -43,6 +43,8 @@ seegpu schedule remove
 seegpu report --days 1
 seegpu report --days 3
 seegpu report --days 7
+seegpu report --days 15
+seegpu report --days 30
 seegpu report --user alice --gpu 0 --days 7
 seegpu report --days 7 --daily
 seegpu export --days 7 --format json > usage.json
@@ -53,7 +55,7 @@ seegpu export --days 7 --format csv > usage.csv
 
 显式执行 `seegpu schedule install` 优先 systemd 用户 timer；未启用 linger 的用户 manager 可能随注销停止，本工具不修改管理员设置。系统 cron 可用时可选择 `seegpu schedule install --backend cron`。cron 周期须为整分钟倍数。机器关机期间不会补采。
 
-`q` 直接退出界面，`h` 查看帮助，`1/3/7` 切换周期，`g` 切换 GPU，`u` 切换用户/进程，Enter 展开用户详情。Tab/翻页键操作表格。支持窄屏、宽屏、8/256 色、黑白与 ASCII：
+`q` 直接退出界面，`h` 查看帮助，`1/3/7/5/0` 选择 1/3/7/15/30 天，`g` 切换 GPU，`u` 切换用户/进程，Enter 展开用户详情。Tab/翻页键操作表格。支持窄屏、宽屏、8/256 色、黑白与 ASCII：
 
 ```bash
 NO_COLOR=1 seegpu
@@ -62,7 +64,7 @@ GPUMONITOR_ASCII=1 seegpu
 
 ## 历史闲置占用排行
 
-按 **t** 切换到统计视图，按估算零活动占用时长从高到低排列，每行对应一个用户和一张 GPU。默认查看保留的最近 **30 天**，**历史占用者即使已经退出、释放显存，也会保留在统计中**。`0` 选择 30 天，`1/3/7` 切换短周期，`g` 筛选 GPU，方向键/翻页键浏览，Enter 查看证据，`t` 或 Esc 返回主界面，`q` 退出。原 CURRENT/HISTORY 指标含义保持不变。
+按 **t** 切换到统计视图，按估算零活动占用时长从高到低排列，每行对应一个用户和一张 GPU。默认查看保留的最近 **30 天**，**历史占用者即使已经退出、释放显存，也会保留在统计中**。`5` 选择 15 天、`0` 选择 30 天，`1/3/7` 切换短周期（原 HISTORY 也支持同样的五档范围），`g` 筛选 GPU，方向键/翻页键浏览，Enter 查看证据，`t` 或 Esc 返回主界面，`q` 退出。原 CURRENT/HISTORY 指标含义保持不变。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -81,6 +83,8 @@ GPUMONITOR_ASCII=1 seegpu
 ```bash
 seegpu idle
 seegpu idle --days 7 --user alice --gpu 0
+seegpu export --days 30 --format csv > usage-30d.csv
+seegpu idle --days 15 --format csv > idle-15d.csv
 seegpu idle --days 30 --format csv > idle.csv
 seegpu idle --format json > idle.json
 ```

@@ -181,3 +181,42 @@ def test_all_five_current_status_counts_sum_to_process_count(mixed_rig):
     assert values[2] == '5'
     assert values[-5:] == ['1'] * 5
     assert sum(map(int, values[-5:])) == int(values[2])
+
+
+def test_long_ranges_switch_in_both_views_and_preserve_dashboard_range(rig, config, monkeypatch):
+    import gpumonitor.tui as tui
+    clock, _, _, sample = rig
+    monkeypatch.setattr(tui.time, 'time', clock.time)
+    monkeypatch.setattr(tui.curses, 'has_colors', lambda: False)
+    monkeypatch.setattr(tui.curses, 'curs_set', lambda value: None)
+
+    class Screen:
+        def __init__(self):
+            self.rows = [' '*80 for _ in range(24)]
+            self.frames = []
+            self.keys = iter(map(ord, '50t50tq'))
+        def getmaxyx(self):
+            return 24, 80
+        def keypad(self, value):
+            pass
+        def timeout(self, value):
+            pass
+        def refresh(self):
+            pass
+        def getch(self):
+            self.frames.append('\n'.join(self.rows))
+            return next(self.keys)
+        def addnstr(self, y, x, text, count, style):
+            self.rows[y] = self.rows[y][:x]+text[:count]+self.rows[y][x+len(text[:count]):]
+
+    with Storage(config.database) as db:
+        db.save(sample(), config)
+        screen = Screen()
+        tui._loop(screen, db, config)
+    frames = screen.frames
+    assert 'HISTORY 15d' in frames[1] and 'HISTORY 30d' in frames[2]
+    assert 'IDLE OCCUPANCY / 30d' in frames[3]
+    assert 'IDLE OCCUPANCY / 15d' in frames[4]
+    assert 'IDLE OCCUPANCY / 30d' in frames[5]
+    assert 'HISTORY 30d' in frames[6] and 'IDLE OCCUPANCY' not in frames[6]
+    assert all('1d 3d 7d 15d 30d' in frame and 'q Quit' in frame for frame in frames)

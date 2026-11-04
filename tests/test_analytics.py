@@ -3,7 +3,7 @@ from gpumonitor.analytics import report
 from gpumonitor.storage import Storage
 
 
-@pytest.mark.parametrize('days', [1, 3, 7])
+@pytest.mark.parametrize('days', [1, 3, 7, 15, 30])
 def test_range_boundary(rig, config, days):
     clock, _, _, sample = rig
     w = sample()
@@ -64,7 +64,7 @@ def test_mixed_unknown_idle_uses_separate_valid_denominator(rig, config):
         assert row['idle_windows'] == row['idle_valid_windows'] == 1 and row['idle_ratio'] == 1
 
 
-@pytest.mark.parametrize('days', [1, 3, 7])
+@pytest.mark.parametrize('days', [1, 3, 7, 15, 30])
 @pytest.mark.parametrize('daily', [False, True])
 def test_mixed_active_unknown_preserves_user_windows_and_counts_process_windows(mixed_rig, config, days, daily):
     clock, sample = mixed_rig

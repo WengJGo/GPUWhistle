@@ -3,6 +3,8 @@ import time
 from datetime import datetime
 from .models import stats, user_key
 
+HISTORY_DAYS = (1, 3, 7, 15, 30)
+
 
 def report(storage, config, days=1, user=None, gpu=None, daily=False, now=None):
     now = time.time() if now is None else now

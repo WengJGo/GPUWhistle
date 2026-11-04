@@ -100,7 +100,7 @@ def test_terminal_fallbacks_and_repeated_resize(config, rig, tmp_path, terminal,
                     index += 1
                     next_change = time.monotonic()+.12
                 else:
-                    os.write(master, b'\n\n703gatt7rhhq')
+                    os.write(master, b'\n\n7503gatt507rhhq')
                     next_change = deadline+1
         child.wait(timeout=3)
         assert child.returncode == 0 and index == len(sizes), output.decode(errors='replace')

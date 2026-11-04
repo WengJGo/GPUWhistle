@@ -3,7 +3,7 @@ import curses
 import time
 from collections import Counter
 from datetime import datetime
-from .analytics import report
+from .analytics import HISTORY_DAYS, report
 from .idle_stats import idle_report
 from .cli import number
 from .models import user_key
@@ -12,9 +12,8 @@ from .tui_render import Frame, layout
 
 HELP = [
     ('q', 'Quit immediately'), ('h / ?', 'Show or close this help'),
-    ('1 / 3 / 7', 'History: last 24 / 72 / 168 hours'),
+    ('1 / 3 / 7 / 5 / 0', 'History range: 1 / 3 / 7 / 15 / 30 days'),
     ('t', 'Toggle historical idle ranking (default: all 30 days)'),
-    ('0 (statistics)', 'Include all retained history, last 30 days'),
     ('g / Left / Right', 'Cycle GPU selection; a selects all GPUs'),
     ('u', 'Switch users / processes'), ('n / m / i', 'Sort by name / VRAM / idle streak'),
     ('s', 'Cycle sort order'), ('Tab', 'Focus current usage / history'),
@@ -26,6 +25,7 @@ HELP = [
 ]
 STATUS = {'ACTIVE': 'ACTIVE', 'LOW_ACTIVITY': 'LOW', 'NO_ACTIVITY_OBSERVED': 'NOACT',
           'SUSPECTED_IDLE': 'IDLE?', 'UNKNOWN': 'UNKNOWN'}
+RANGE_KEYS = dict(zip(map(ord, '13750'), HISTORY_DAYS))
 
 
 def duration(seconds):
@@ -367,7 +367,7 @@ def status_bar(window, cards, days, gpu, paused, period, theme):
     updated = datetime.fromtimestamp(window['end']).strftime('%H:%M:%S') if window else 'N/A'
     title = rich(('GPUWhistle', 'title'), ('  seegpu', 'dim'), sep, device, sep, 'Updated ',
                  (updated, '' if window else 'na'), sep)
-    for value in ((1, 3, 7, 30) if days == 30 else (1, 3, 7)):
+    for value in HISTORY_DAYS:
         title = rich(title, ('%sd' % value, 'tab' if days == value else 'dim'), ' ')
     if paused:
         title = rich(title, ('  PAUSED', 'LOW_ACTIVITY'))
@@ -430,7 +430,7 @@ def _loop(screen, storage, config):
             stats_offset, stats_page = draw_panel(frame, 5, 0, height-6, width-2,
                 'IDLE OCCUPANCY / %sd / descending ZERO~ / %s historical owners' % (stats_days, len(ranking['rows'])),
                 stat_lines, stats_offset, True, colors)
-            put(frame, height-1, 0, 't Back 0/1/3/7 Range g GPU Enter Evidence h Help q Quit', width-1, colors.get('dim', 0))
+            put(frame, height-1, 0, 't Back 1/3/7/5/0 Days g GPU Enter Evidence h Help q Quit', width-1, colors.get('dim', 0))
         else:
             overview = gpu_panel(window or {}, gpu, width-1, compact=width < 120, theme=theme)
             geometry = layout(width, height, len(overview))
@@ -459,8 +459,8 @@ def _loop(screen, storage, config):
             hist_y, hist_x, hist_height = geometry.history_y, geometry.history_x, geometry.history_height
             offsets[1], page1 = draw_panel(frame, hist_y, hist_x, hist_height, panel_width, history_title,
                 hist, offsets[1], focus == 1, colors)
-            footer = ('t Stats  1/3/7 History  g GPU  u User  Enter Detail  h Help  q Quit' if width >= 70
-                      else 't Stats 1/3/7 History g GPU Enter Detail h Help q Quit')
+            footer = ('t Stats 1/3/7/5/0 Days g GPU u User Enter Detail h Help q Quit' if width >= 70
+                      else 't Stats 1/3/7/5/0 Days g GPU Enter Detail h Help q Quit')
             put(frame, height-1, 0, footer, width-1, colors.get('dim', 0))
         if width < 60 or height < 18:
             frame.begin()
@@ -493,10 +493,8 @@ def _loop(screen, storage, config):
             stats_open, refreshed, ranking = not stats_open, 0, None
             stats_offset = 0
             continue
-        if stats_open and key not in (ord('1'), ord('3'), ord('7'), ord('g'), curses.KEY_LEFT, curses.KEY_RIGHT, ord('a'), ord('r'), ord(' ')):
-            if key == ord('0'):
-                stats_days, stats_selected, stats_offset, refreshed = 30, 0, 0, 0
-            elif key in (curses.KEY_ENTER, 10, 13):
+        if stats_open and key not in (*RANGE_KEYS, ord('g'), curses.KEY_LEFT, curses.KEY_RIGHT, ord('a'), ord('r'), ord(' ')):
+            if key in (curses.KEY_ENTER, 10, 13):
                 stats_detail, stats_offset = not stats_detail, max(0, (stat_row or 1)-1)
             elif key in (curses.KEY_DOWN, curses.KEY_UP):
                 delta = 1 if key == curses.KEY_DOWN else -1
@@ -513,11 +511,11 @@ def _loop(screen, storage, config):
                         if key == curses.KEY_END else max(0, min(len(ranking['rows'])-1,
                             stats_selected+(stats_page if key == curses.KEY_NPAGE else -stats_page))))
             continue
-        if key in (ord('1'), ord('3'), ord('7')):
+        if key in RANGE_KEYS:
             if stats_open:
-                stats_days, stats_selected, stats_offset = int(chr(key)), 0, 0
+                stats_days, stats_selected, stats_offset = RANGE_KEYS[key], 0, 0
             else:
-                days = int(chr(key))
+                days = RANGE_KEYS[key]
             refreshed, offsets = 0, [0, 0]
         elif key in (ord('g'), curses.KEY_LEFT, curses.KEY_RIGHT, ord('a')):
             devices = [None] + [g['uuid'] for g in cards]
