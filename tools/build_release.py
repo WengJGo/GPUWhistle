@@ -28,7 +28,7 @@ def main():
         package = Path(temporary) / 'GPUWhistle'
         package.mkdir()
         for name in ('README.md', 'README.zh-CN.md', 'QUICKSTART.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'pyproject.toml',
-                     'requirements.txt', 'config.example.json', 'theme.example.json', 'setup.sh', 'install.sh', 'uninstall.sh'):
+                     'requirements.txt', 'config.example.json', 'theme.example.json', 'cluster.example.json', 'setup.sh', 'install.sh', 'uninstall.sh'):
             shutil.copy2(ROOT / name, package / name)
         for name in ('gpumonitor', 'packaging', 'docs', 'licenses'):
             shutil.copytree(ROOT / name, package / name,

@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"name": "this-node", "target": "local"},
+    {"name": "node-a", "target": "node-a"},
+    {"name": "node-b", "target": "node-b"}
+  ],
+  "timeout": 12,
+  "free_memory_mib": 256,
+  "stale_after": 30
+}

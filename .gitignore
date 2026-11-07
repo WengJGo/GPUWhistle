@@ -31,6 +31,7 @@ theme.json
 *.json
 !config.example.json
 !theme.example.json
+!cluster.example.json
 
 # Private monitoring records, exports and deployment notes
 *.db

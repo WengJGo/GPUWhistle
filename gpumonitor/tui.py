@@ -1,10 +1,11 @@
-"""SQLite-only dashboard with independent, scrollable current/history panels."""
+"""Sampled dashboard, historical ranking and on-demand cluster availability."""
 import curses
 import time
 from collections import Counter
 from datetime import datetime
 from .analytics import HISTORY_DAYS, report
 from .idle_stats import idle_report
+from .cluster import ClusterConfig, LiveScan, cluster_path, gpu_status
 from .cli import number
 from .models import user_key
 from .tui_theme import Theme, fit, pad, rich, width as cell_length, colors as theme_colors
@@ -14,6 +15,8 @@ HELP = [
     ('q', 'Quit immediately'), ('h / ?', 'Show or close this help'),
     ('1 / 3 / 7 / 5 / 0', 'History range: 1 / 3 / 7 / 15 / 30 days'),
     ('t', 'Toggle historical idle ranking (default: all 30 days)'),
+    ('c', 'Query cluster now / refresh live GPU availability'),
+    ('b (cluster)', 'Back to previous view; Esc also returns'),
     ('g / Left / Right', 'Cycle GPU selection; a selects all GPUs'),
     ('u', 'Switch users / processes'), ('n / m / i', 'Sort by name / VRAM / idle streak'),
     ('s', 'Cycle sort order'), ('Tab', 'Focus current usage / history'),
@@ -26,6 +29,49 @@ HELP = [
 STATUS = {'ACTIVE': 'ACTIVE', 'LOW_ACTIVITY': 'LOW', 'NO_ACTIVITY_OBSERVED': 'NOACT',
           'SUSPECTED_IDLE': 'IDLE?', 'UNKNOWN': 'UNKNOWN'}
 RANGE_KEYS = dict(zip(map(ord, '13750'), HISTORY_DAYS))
+
+
+def cluster_panel(scan, error=None, width=78, now=None):
+    now = time.monotonic() if now is None else now
+    columns = [('HOST', max(8, min(16, width-48)), 'l'), ('GPU', 3, 'r'), ('STATUS', 11, 'l'),
+               ('FREE GiB', 8, 'r'), ('USED GiB', 8, 'r'), ('UTIL', 6, 'r'), ('N', 3, 'r')]
+    if width >= 100:
+        columns.append(('DEVICE', max(8, width-68), 'l'))
+    lines = [('HOST SUMMARY / FREE GPU indexes', 'columns')]
+    counts, cards = Counter(), []
+    if error:
+        lines.append((fit(error, width), 'UNKNOWN'))
+    if not scan.results and not error:
+        lines += [(fit('No cluster nodes configured. Copy cluster.example.json to:', width), 'UNKNOWN'),
+                  (fit(str(cluster_path()), width), 'dim')]
+    for result in scan.results:
+        if result['status'] != 'DONE':
+            label = 'SCANNING' if result['status'] == 'SCANNING' else 'ERROR: '+str(result['error'])
+            lines.append((fit(rich(pad(result['name'], 12), (' '+label, 'UNKNOWN')), width), ''))
+            continue
+        free = [str(g['index']) for g in result['gpus'] if gpu_status(g, result, scan.config, now) == 'FREE']
+        summary = rich(pad(result['name'], 12), ' FREE ',
+            (','.join(free) if free else 'none', 'load_low' if free else 'dim'),
+            '  [%s/%s]' % (len(free), len(result['gpus'])))
+        lines.append((fit(summary, width), ''))
+        for g in result['gpus']:
+            status = gpu_status(g, result, scan.config, now)
+            counts[status] += 1
+            cards.append((status != 'FREE', result['name'], g['index'], status, g))
+    if cards:
+        lines += [('GPU DETAILS / free cards first', 'section'),
+                  (fit(table(columns, [c[0] for c in columns]), width), 'columns')]
+    for _, host, index, status, g in sorted(cards, key=lambda row: row[:3]):
+        role = 'load_low' if status == 'FREE' else 'LOW_ACTIVITY' if status in ('IN_USE', 'UNAVAILABLE') else 'UNKNOWN'
+        values = [host, index, status, number(g.get('free_mib'), scale=1024),
+                  number(g.get('used_mib'), scale=1024), number(g.get('gpu_util'), '%'),
+                  g['process_count'] if g.get('process_count') is not None else 'N/A']
+        roles = ['load_low' if status == 'FREE' else '', '', role, role if status == 'FREE' else '', '', '', '']
+        if width >= 100:
+            values.append(g.get('name', 'N/A'))
+            roles.append('dim')
+        lines.append((fit(table(columns, values, roles), width), ''))
+    return lines, counts
 
 
 def duration(seconds):
@@ -388,6 +434,11 @@ def status_bar(window, cards, days, gpu, paused, period, theme):
 
 
 def _loop(screen, storage, config):
+    with LiveScan() as scan:
+        return _dashboard(screen, storage, config, scan)
+
+
+def _dashboard(screen, storage, config, scan):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -401,8 +452,10 @@ def _loop(screen, storage, config):
     detail = daily = help_open = paused = False
     stats_open = stats_detail = False
     stats_days, stats_selected, stats_offset, ranking = 30, 0, 0, None
+    cluster_open, cluster_offset, cluster_error = False, 0, None
     focus, offsets, refreshed, window, history = 0, [0, 0], 0, None, None
     while True:
+        scan.poll()
         if history is None or refreshed == 0 or (not paused and time.monotonic() - refreshed >= 5):
             window = storage.latest()
             history = report(storage, config, days, gpu=gpu, daily=daily)
@@ -417,7 +470,20 @@ def _loop(screen, storage, config):
         title, fresh = status_bar(window, cards, stats_days if stats_open else days, gpu, paused, config.period, theme)
         put(frame, 0, 0, title, width-1)
         put(frame, 1, 0, fresh, width-1)
-        if stats_open:
+        if cluster_open:
+            live, counts = cluster_panel(scan, cluster_error, width-2)
+            complete = sum(r['status'] != 'SCANNING' for r in scan.results)
+            age = max((time.monotonic()-r['started_monotonic'] for r in scan.results), default=0)
+            put(frame, 0, 0, rich(('GPUWhistle', 'title'), '  CLUSTER LIVE', '  c refresh / b back'), width-1)
+            put(frame, 1, 0, rich('%s/%s hosts returned | ' % (complete, len(scan.results)),
+                ('%s FREE' % counts['FREE'], 'load_low' if counts['FREE'] else 'dim'),
+                ' | %s IN_USE | %s UNKNOWN/STALE | age %.0fs' % (counts['IN_USE'], counts['UNKNOWN']+counts['STALE'], age)), width-1)
+            put(frame, 2, 0, 'FREE = no GPU processes + UTIL 0%% + used <= %.0f MiB' % scan.config.free_memory_mib, width-1, colors.get('dim', 0))
+            put(frame, 3, 0, 'Snapshot only; no reservation. STALE after %.0fs; c queries again.' % scan.config.stale_after, width-1, colors.get('dim', 0))
+            cluster_offset, cluster_page = draw_panel(frame, 5, 0, height-6, width-2,
+                'LIVE GPU AVAILABILITY', live, cluster_offset, True, colors)
+            put(frame, height-1, 0, 'c Collect now  b Back  Up/Down Scroll  h Help  q Quit', width-1, colors.get('dim', 0))
+        elif stats_open:
             stats_selected = min(stats_selected, max(0, len(ranking['rows'])-1))
             stat_lines, stat_row = idle_panel(ranking, stats_selected, stats_detail, width-2)
             put(frame, 2, 0, 'ZERO~: zero observations x sampling period; SAMP: measured zero time', width-1, colors.get('dim', 0))
@@ -430,7 +496,7 @@ def _loop(screen, storage, config):
             stats_offset, stats_page = draw_panel(frame, 5, 0, height-6, width-2,
                 'IDLE OCCUPANCY / %sd / descending ZERO~ / %s historical owners' % (stats_days, len(ranking['rows'])),
                 stat_lines, stats_offset, True, colors)
-            put(frame, height-1, 0, 't Back 1/3/7/5/0 Days g GPU Enter Evidence h Help q Quit', width-1, colors.get('dim', 0))
+            put(frame, height-1, 0, 'c Live t Back 1/3/7/5/0 Days Enter Evidence h Help q Quit', width-1, colors.get('dim', 0))
         else:
             overview = gpu_panel(window or {}, gpu, width-1, compact=width < 120, theme=theme)
             geometry = layout(width, height, len(overview))
@@ -459,8 +525,8 @@ def _loop(screen, storage, config):
             hist_y, hist_x, hist_height = geometry.history_y, geometry.history_x, geometry.history_height
             offsets[1], page1 = draw_panel(frame, hist_y, hist_x, hist_height, panel_width, history_title,
                 hist, offsets[1], focus == 1, colors)
-            footer = ('t Stats 1/3/7/5/0 Days g GPU u User Enter Detail h Help q Quit' if width >= 70
-                      else 't Stats 1/3/7/5/0 Days g GPU Enter Detail h Help q Quit')
+            footer = ('c Live t Stats 1/3/7/5/0 Days g GPU Enter Detail h Help q Quit' if width >= 70
+                      else 'c Live t Stats 1/3/7/5/0 Days Enter Detail h Help q Quit')
             put(frame, height-1, 0, footer, width-1, colors.get('dim', 0))
         if width < 60 or height < 18:
             frame.begin()
@@ -477,6 +543,9 @@ def _loop(screen, storage, config):
         if key == 27:
             if help_open:
                 help_open = False
+            elif cluster_open:
+                cluster_open = False
+                scan.close()
             elif stats_open:
                 if stats_detail:
                     stats_detail, stats_offset = False, 0
@@ -488,6 +557,27 @@ def _loop(screen, storage, config):
                 return
             continue
         if help_open:
+            continue
+        if key == ord('c'):
+            cluster_open, cluster_offset, cluster_error = True, 0, None
+            scan.close()
+            scan.results = []
+            try:
+                scan.start(ClusterConfig.load())
+            except (OSError, ValueError, TypeError) as exc:
+                cluster_error = 'Cluster config: %s' % exc
+            continue
+        if cluster_open:
+            if key in (ord('b'), ord('t')):
+                cluster_open = False
+                scan.close()
+                if key == ord('t'):
+                    stats_open, refreshed = not stats_open, 0
+            elif key in (curses.KEY_DOWN, curses.KEY_UP):
+                cluster_offset = max(0, cluster_offset+(1 if key == curses.KEY_DOWN else -1))
+            elif key in (curses.KEY_HOME, curses.KEY_END, curses.KEY_PPAGE, curses.KEY_NPAGE):
+                cluster_offset = (0 if key == curses.KEY_HOME else max(0, len(live)-cluster_page-1)
+                    if key == curses.KEY_END else max(0, cluster_offset+(cluster_page if key == curses.KEY_NPAGE else -cluster_page)))
             continue
         if key == ord('t'):
             stats_open, refreshed, ranking = not stats_open, 0, None

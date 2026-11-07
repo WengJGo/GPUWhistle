@@ -80,6 +80,8 @@ Cron checks once per minute and samples only when the current configured period 
 | `q` | Quit immediately |
 | `h` / `?` | Keyboard help |
 | `t` | Toggle historical idle occupancy ranking; default last 30 days |
+| `c` | Query configured cluster nodes now; press again to rescan |
+| `b` / Esc (cluster) | Return to previous view, cancelling pending probes |
 | `5` / `0` | Last 15 / 30 days, in both HISTORY and idle ranking |
 | `1` / `3` / `7` | Last 24 / 72 / 168 hours |
 | `g`, Left / Right; `a` | Cycle GPUs; show all GPUs |
@@ -115,6 +117,24 @@ seegpu idle --days 15 --format csv > idle-15d.csv
 seegpu idle --days 30 --format csv > idle.csv
 seegpu idle --format json > idle.json
 ```
+
+### Live cluster availability
+
+Copy `cluster.example.json` to `~/.config/gpumonitor/cluster.json` and list your SSH destinations. `target: "local"` queries the current host. Real host names, addresses and credentials belong in local configuration, not the repository. `GPUMONITOR_CLUSTER` selects another cluster configuration.
+
+Press **c** to start parallel queries and open the live view. Host summaries show free GPU indexes; details list free cards first, remaining VRAM, used VRAM, GPU utilization and process counts. The UI stays responsive while hosts return independently. **c** rescans, **b** or Esc returns, arrow/page keys scroll, and **q** exits and terminates only outstanding probe commands. This view does not write history, change sampling schedules, allocate GPU memory or reserve a card.
+
+Green **FREE** requires all of: an explicitly empty compute/graphics process list, 0% GPU utilization, known used memory at or below `free_memory_mib` (default 256 MiB for driver overhead), usable remaining memory, non-MIG mode and an enabled compute mode. A card holding substantial memory is IN_USE even at 0% utilization. Missing/unsupported metrics and ambiguous MIG data remain UNKNOWN; connection failures remain ERROR. Results turn STALE after `stale_after` (default 30 seconds), losing their green color until queried again. FREE means **no use observed in that snapshot**, not proof of continuous non-use or a reservation.
+
+Remote hosts need `python3`, `nvidia-smi` and existing noninteractive SSH access with verified host keys. They do not need GPUWhistle or Python packages installed. SSH uses BatchMode and strict host-key checking; the tool does not install keys, accept unknown host keys, or prompt for passwords. Hosts run concurrently with a configurable per-host timeout (default 12 seconds). Actual hardware/SSH failures never become zero measurements.
+
+```bash
+seegpu cluster
+seegpu cluster --format json
+seegpu cluster --cluster-config ./cluster.json --format json
+```
+
+The command returns a nonzero exit status if no nodes are configured or any host fails, while retaining successful hosts' results. The normal `r` key continues to refresh SQLite only; use `c` for live cluster queries.
 
 GPU UUID is stable; an index filter refers to the index recorded in each window. JSON exports also include GPU-wide window power trends. CSV memory values are bytes, timestamps are Unix seconds, and ratios are 0..1. A seven-day query only reports observations actually collected.
 

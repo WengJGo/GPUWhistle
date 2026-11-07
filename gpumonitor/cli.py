@@ -42,6 +42,9 @@ def parser():
     idle.add_argument('--user')
     idle.add_argument('--gpu', help='current index or stable UUID')
     idle.add_argument('--format', choices=('text', 'json', 'csv'), default='text')
+    cluster = sub.add_parser('cluster', help='Query live GPU availability on configured SSH nodes')
+    cluster.add_argument('--cluster-config', help='Cluster JSON path (default: XDG gpumonitor/cluster.json)')
+    cluster.add_argument('--format', choices=('text', 'json'), default='text')
     return p
 
 
@@ -132,6 +135,31 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         config = load(args.config)
+        if args.command == 'cluster':
+            from .cluster import ClusterConfig, collect_cluster, gpu_status
+            settings = ClusterConfig.load(args.cluster_config)
+            results = collect_cluster(settings)
+            for r in results:
+                for g in r['gpus']:
+                    g['status'] = gpu_status(g, r, settings)
+                r.pop('started_monotonic')
+            if args.format == 'json':
+                print(json.dumps(dict(nodes=results, free_memory_mib=settings.free_memory_mib,
+                    note='FREE is a point-in-time observation, not a reservation. UNKNOWN is never free.'), ensure_ascii=False, indent=2))
+            else:
+                print('GPUWhistle | CLUSTER LIVE | FREE: no processes, UTIL 0%%, used <= %.0f MiB' % settings.free_memory_mib)
+                for r in results:
+                    if r['status'] != 'DONE':
+                        print('%s ERROR: %s' % (r['name'], r['error']))
+                    for g in r['gpus']:
+                        print('%-16s GPU %-3s %-11s FREE %s GiB / %s GiB | used %s GiB | util %s | processes %s' % (
+                            r['name'], g['index'], g['status'], number(g.get('free_mib'), scale=1024),
+                            number(g.get('total_mib'), scale=1024), number(g.get('used_mib'), scale=1024),
+                            number(g.get('gpu_util'), '%'), g.get('process_count') if g.get('process_count') is not None else 'N/A'))
+                if not results:
+                    print('No cluster nodes configured. Copy cluster.example.json to ~/.config/gpumonitor/cluster.json.')
+                print('Snapshot only; FREE does not reserve a GPU. UNKNOWN is never counted as free.')
+            return 1 if not results or any(r['status'] == 'ERROR' for r in results) else 0
         if args.command == 'doctor':
             return doctor(config)
         if args.command == 'schedule':

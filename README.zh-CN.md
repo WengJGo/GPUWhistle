@@ -62,6 +62,24 @@ NO_COLOR=1 seegpu
 GPUMONITOR_ASCII=1 seegpu
 ```
 
+## 即时查询集群空卡
+
+复制 `cluster.example.json` 到 `~/.config/gpumonitor/cluster.json`，将 `nodes` 改成自己的服务器列表。每个节点包含显示名称 `name` 和 SSH 目标 `target`；`target` 为 `local` 时查询当前机器。真实机器地址、用户名及凭据只放本地配置。可用 `GPUMONITOR_CLUSTER` 指定另一份配置。
+
+在界面按 **c**，立即并行查询全部配置节点，独立显示每台机器的进度及结果。上方汇总各机器空卡编号，下方优先列出空卡，并显示实际剩余显存、占用显存、GPU 利用率和进程数。再次按 **c** 重新采集；**b** 或 Esc 返回原视图；方向键/翻页键浏览；**q** 退出并终止尚未完成的查询命令。该功能不写入历史，不改变定时采集，不创建 CUDA 上下文，也不预留 GPU。
+
+绿色 **FREE** 同时要求：计算/图形进程列表明确为空、GPU 利用率为 0%、显存读数有效且占用不超过 `free_memory_mib`（默认 256 MiB，允许驱动开销）、仍有可用显存、非 MIG 模式、计算模式允许使用。**GPU 利用率 0% 但持有大量显存依然是 IN_USE。** 不支持、缺失及 MIG 信息不确定显示 UNKNOWN，连接失败显示 ERROR，绝不按空卡标绿。结果超过 `stale_after`（默认 30 秒）转为 STALE 并取消绿色，按 c 重查。FREE 只表示本次快照未发现使用，不证明一直没人用，也不代表已为你锁定这张卡。
+
+远端只需已有 `python3`、`nvidia-smi`、免交互 SSH 登录权限和已验证的主机公钥，无需安装 GPUWhistle 或额外 Python 依赖。查询启用 BatchMode 和严格主机密钥校验，不自动安装密钥、信任未知主机或询问密码。默认每台超时 12 秒，某台失败不会阻碍其他结果，也不会卡住界面。
+
+```bash
+seegpu cluster
+seegpu cluster --format json
+seegpu cluster --cluster-config ./cluster.json --format json
+```
+
+命令行在未配置节点或任一节点失败时返回非零状态，仍输出其他成功节点的数据。原来的 r 键继续只刷新 SQLite，c 才会触发即时查询。
+
 ## 历史闲置占用排行
 
 按 **t** 切换到统计视图，按估算零活动占用时长从高到低排列，每行对应一个用户和一张 GPU。默认查看保留的最近 **30 天**，**历史占用者即使已经退出、释放显存，也会保留在统计中**。`5` 选择 15 天、`0` 选择 30 天，`1/3/7` 切换短周期（原 HISTORY 也支持同样的五档范围），`g` 筛选 GPU，方向键/翻页键浏览，Enter 查看证据，`t` 或 Esc 返回主界面，`q` 退出。原 CURRENT/HISTORY 指标含义保持不变。
