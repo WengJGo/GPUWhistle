@@ -116,3 +116,39 @@ def test_q_exits_while_ssh_pending_and_reaps_probe_children(config,rig,tmp_path,
                     os.killpg(int(pid),signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+
+def test_live_view_automatically_requeries_and_back_stops_queries(config,rig,tmp_path,monkeypatch):
+    proc,master,calls = start(config,rig,tmp_path,monkeypatch)
+    cluster=tmp_path/'cluster.json'
+    settings=json.loads(cluster.read_text())
+    settings.update(refresh_interval=1,stale_after=2)
+    cluster.write_text(json.dumps(settings))
+    payload=json.dumps({'gpus':[card()]})
+    (tmp_path/'bin/ssh').write_text('#!'+sys.executable+'\nimport os,sys\n'
+        +'with open(%r,"a") as f:f.write(sys.argv[-2]+"\\n")\n' % str(calls)
+        +'print(%r)\n' % payload)
+    output,phase,back_at,count = bytearray(),0,None,0
+    deadline=time.monotonic()+10
+    try:
+        while proc.poll() is None and time.monotonic()<deadline:
+            read(master,output)
+            if phase==0 and b'GPUWhistle' in output:
+                os.write(master,b'c');phase=1
+            if phase==1 and calls.exists() and len(calls.read_text().splitlines())>=15:
+                os.write(master,b'b');phase=2
+                back_at=time.monotonic()
+            if phase==2 and time.monotonic()-back_at>2:
+                count=len(calls.read_text().splitlines())
+                os.write(master,b'q');phase=3
+        proc.wait(timeout=2)
+        assert proc.returncode==0 and phase==3,output.decode(errors='replace')
+        from collections import Counter
+        nodes=Counter(calls.read_text().splitlines())
+        assert len(nodes)==5 and all(n>=3 for n in nodes.values())
+        assert count==len(calls.read_text().splitlines())==15
+        assert b'Auto +1s' in output
+    finally:
+        if proc.poll() is None:
+            proc.kill();proc.wait()
+        os.close(master)

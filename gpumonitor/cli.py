@@ -143,6 +143,7 @@ def main(argv=None):
                 for g in r['gpus']:
                     g['status'] = gpu_status(g, r, settings)
                 r.pop('started_monotonic')
+                r.pop('sample_monotonic', None)
             if args.format == 'json':
                 print(json.dumps(dict(nodes=results, free_memory_mib=settings.free_memory_mib,
                     note='FREE is a point-in-time observation, not a reservation. UNKNOWN is never free.'), ensure_ascii=False, indent=2))

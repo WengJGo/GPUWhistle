@@ -45,14 +45,23 @@ def cluster_panel(scan, error=None, width=78, now=None):
         lines += [(fit('No cluster nodes configured. Copy cluster.example.json to:', width), 'UNKNOWN'),
                   (fit(str(cluster_path()), width), 'dim')]
     for result in scan.results:
-        if result['status'] != 'DONE':
+        if result['status'] not in ('DONE', 'REFRESHING'):
             label = 'SCANNING' if result['status'] == 'SCANNING' else 'ERROR: '+str(result['error'])
             lines.append((fit(rich(pad(result['name'], 12), (' '+label, 'UNKNOWN')), width), ''))
             continue
-        free = [str(g['index']) for g in result['gpus'] if gpu_status(g, result, scan.config, now) == 'FREE']
-        summary = rich(pad(result['name'], 12), ' FREE ',
-            (','.join(free) if free else 'none', 'load_low' if free else 'dim'),
-            '  [%s/%s]' % (len(free), len(result['gpus'])))
+        statuses = [gpu_status(g, result, scan.config, now) for g in result['gpus']]
+        free = [str(g['index']) for g, status in zip(result['gpus'], statuses) if status == 'FREE']
+        if statuses and all(status == 'STALE' for status in statuses):
+            summary = rich(pad(result['name'], 12), (' STALE / last reading expired', 'UNKNOWN'))
+        else:
+            summary = rich(pad(result['name'], 12), ' FREE ',
+                (','.join(free) if free else 'none known' if any(s in ('UNKNOWN', 'STALE') for s in statuses) else 'none',
+                 'load_low' if free else 'dim'), '  [%s/%s]' % (len(free), len(result['gpus'])))
+            uncertain = sum(s in ('UNKNOWN', 'STALE') for s in statuses)
+            if uncertain:
+                summary = rich(summary, ('  %s unknown/stale' % uncertain, 'UNKNOWN'))
+        if result['status'] == 'REFRESHING':
+            summary = rich(summary, ('  refreshing', 'dim'))
         lines.append((fit(summary, width), ''))
         for g in result['gpus']:
             status = gpu_status(g, result, scan.config, now)
@@ -456,6 +465,8 @@ def _dashboard(screen, storage, config, scan):
     focus, offsets, refreshed, window, history = 0, [0, 0], 0, None, None
     while True:
         scan.poll()
+        if cluster_open:
+            scan.refresh_if_due()
         if history is None or refreshed == 0 or (not paused and time.monotonic() - refreshed >= 5):
             window = storage.latest()
             history = report(storage, config, days, gpu=gpu, daily=daily)
@@ -473,13 +484,17 @@ def _dashboard(screen, storage, config, scan):
         if cluster_open:
             live, counts = cluster_panel(scan, cluster_error, width-2)
             complete = sum(r['status'] != 'SCANNING' for r in scan.results)
-            age = max((time.monotonic()-r['started_monotonic'] for r in scan.results), default=0)
+            age = max((time.monotonic()-r.get('sample_monotonic', r['started_monotonic']) for r in scan.results), default=0)
             put(frame, 0, 0, rich(('GPUWhistle', 'title'), '  CLUSTER LIVE', '  c refresh / b back'), width-1)
             put(frame, 1, 0, rich('%s/%s hosts returned | ' % (complete, len(scan.results)),
                 ('%s FREE' % counts['FREE'], 'load_low' if counts['FREE'] else 'dim'),
-                ' | %s IN_USE | %s UNKNOWN/STALE | age %.0fs' % (counts['IN_USE'], counts['UNKNOWN']+counts['STALE'], age)), width-1)
+                ' | %s IN_USE | %s UNKNOWN/STALE | age %.0fs' % (counts['IN_USE'], counts['UNKNOWN']+counts['STALE'], age),
+                (' QUERYING' if scan.running else '', 'dim')), width-1)
             put(frame, 2, 0, 'FREE = no GPU processes + UTIL 0%% + used <= %.0f MiB' % scan.config.free_memory_mib, width-1, colors.get('dim', 0))
-            put(frame, 3, 0, 'Snapshot only; no reservation. STALE after %.0fs; c queries again.' % scan.config.stale_after, width-1, colors.get('dim', 0))
+            updated = max((r['checked_at'] or 0 for r in scan.results), default=0)
+            updated = datetime.fromtimestamp(updated).strftime('%H:%M:%S') if updated else 'N/A'
+            put(frame, 3, 0, 'Auto +%gs | Updated %s | STALE after %gs | c refresh now' % (
+                scan.config.refresh_seconds, updated, scan.config.stale_after), width-1, colors.get('dim', 0))
             cluster_offset, cluster_page = draw_panel(frame, 5, 0, height-6, width-2,
                 'LIVE GPU AVAILABILITY', live, cluster_offset, True, colors)
             put(frame, height-1, 0, 'c Collect now  b Back  Up/Down Scroll  h Help  q Quit', width-1, colors.get('dim', 0))

@@ -24,15 +24,16 @@ class ClusterConfig:
     timeout: float = 12
     free_memory_mib: float = 256
     stale_after: float = 30
+    refresh_interval: float = 10
 
     @classmethod
     def load(cls, path=None):
         path = Path(path) if path else cluster_path()
         data = json.loads(path.read_text()) if path.exists() else {}
-        if not isinstance(data, dict) or set(data)-{'nodes', 'timeout', 'free_memory_mib', 'stale_after'}:
+        if not isinstance(data, dict) or set(data)-{'nodes', 'timeout', 'free_memory_mib', 'stale_after', 'refresh_interval'}:
             raise ValueError('Invalid cluster configuration keys')
         config = cls(**dict(data, nodes=tuple(data.get('nodes', ()))))
-        for key, lower, upper in (('timeout', 1, 60), ('free_memory_mib', 0, 4096), ('stale_after', 1, 300)):
+        for key, lower, upper in (('timeout', 1, 60), ('free_memory_mib', 0, 4096), ('stale_after', 1, 300), ('refresh_interval', 1, 300)):
             value = getattr(config, key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lower <= value <= upper:
                 raise ValueError('Invalid cluster ' + key)
@@ -49,6 +50,11 @@ class ClusterConfig:
             if not isinstance(target, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.@:-]{0,254}', target):
                 raise ValueError('Cluster target must be an SSH destination or local')
         return config
+
+    @property
+    def refresh_seconds(self):
+        # Short expiry settings must also refresh before their deadline.
+        return min(self.refresh_interval, self.stale_after / 2)
 
 
 def _number(value):
@@ -76,7 +82,7 @@ def classify(gpu, threshold):
 
 def gpu_status(gpu, result, config, now=None):
     now = time.monotonic() if now is None else now
-    if now-result['started_monotonic'] > config.stale_after:
+    if now-result.get('sample_monotonic', result['started_monotonic']) > config.stale_after:
         return 'STALE'
     return gpu['status']
 
@@ -88,6 +94,7 @@ class LiveScan:
         self.jobs = {}
         self.results = []
         self.config = ClusterConfig()
+        self.next_refresh = None
 
     def __enter__(self):
         return self
@@ -96,14 +103,20 @@ class LiveScan:
         self.close()
         self.selector.close()
 
-    def start(self, config):
+    def start(self, config, keep_results=False):
+        previous = {r['name']: r for r in self.results} if keep_results else {}
         self.close()
         self.results = []
         self.config = config
+        self.next_refresh = time.monotonic()+config.refresh_seconds if config.nodes else None
         source = Path(__file__).with_name('cluster_probe.py').read_text()
         for node in config.nodes:
             result = dict(name=node['name'], status='SCANNING', gpus=[], error=None,
                           started_monotonic=time.monotonic(), checked_at=None)
+            old = previous.get(node['name'])
+            if old and old['status'] == 'DONE':
+                result.update(status='REFRESHING', gpus=old['gpus'], checked_at=old['checked_at'],
+                    sample_monotonic=old.get('sample_monotonic', old['started_monotonic']))
             self.results.append(result)
             command = ([sys.executable, str(Path(__file__).with_name('cluster_probe.py'))] if node['target'] == 'local' else
                 ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
@@ -114,7 +127,7 @@ class LiveScan:
                 proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, start_new_session=True)
             except OSError as exc:
-                result.update(status='ERROR', error=str(exc))
+                result.update(status='ERROR', error=str(exc), gpus=[])
                 continue
             job = dict(proc=proc, result=result, stdout=bytearray(), stderr=bytearray())
             self.jobs[proc.pid] = job
@@ -153,6 +166,7 @@ class LiveScan:
         self.jobs.pop(proc.pid, None)
 
     def poll(self):
+        was_running = self.running
         # Drain all ready bytes; even inventories larger than a pipe buffer must finish.
         for _ in range(16):
             if not self.selector.select(0):
@@ -191,18 +205,29 @@ class LiveScan:
                         g['status'] = classify(g, self.config.free_memory_mib)
                     if len({g['index'] for g in rows}) != len(rows):
                         raise ValueError('Duplicate GPU index')
-                    result.update(gpus=sorted(rows, key=lambda g: g['index']), status='DONE', checked_at=time.time())
+                    result.update(gpus=sorted(rows, key=lambda g: g['index']), status='DONE', checked_at=time.time(),
+                                  sample_monotonic=result['started_monotonic'])
                 except (ValueError, KeyError, TypeError) as exc:
                     error = '%s: %s' % (type(exc).__name__, exc)
             if error:
                 result.update(status='ERROR', error=error, gpus=[])
             self._stop(job)
+        if was_running and not self.running:
+            self.next_refresh = time.monotonic()+self.config.refresh_seconds
+
+    def refresh_if_due(self, now=None):
+        now = time.monotonic() if now is None else now
+        if not self.running and self.next_refresh is not None and now >= self.next_refresh:
+            self.start(self.config, keep_results=True)
+            return True
+        return False
 
     @property
     def running(self):
         return bool(self.jobs)
 
     def close(self):
+        self.next_refresh = None
         for job in list(self.jobs.values()):
             self._stop(job)
 

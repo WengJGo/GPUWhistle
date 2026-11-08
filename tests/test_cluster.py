@@ -72,6 +72,7 @@ def test_xml_na_util_and_incomplete_inventory():
 
 @pytest.mark.parametrize('data', [
     {'timeout':0}, {'timeout':True}, {'stale_after':float('nan')}, {'free_memory_mib':-1},
+    {'refresh_interval':0}, {'refresh_interval':True}, {'refresh_interval':float('nan')},
     {'bad':1}, {'nodes':[{'name':'x','target':'-oProxyCommand=bad'}]},
     {'nodes':[{'name':'x','target':'host; command'}]},
     {'nodes':[{'name':'x','target':'host','extra':1}]},
@@ -167,6 +168,8 @@ def test_summary_free_first_color_na_staleness_and_bounded_width(width):
         r = scan.results[1]
         lines, counts = cluster_panel(scan, width=width, now=r['started_monotonic']+31)
         assert counts['FREE'] == 0 and counts['STALE'] >= 1
+        summaries = '\n'.join(str(line) for line,_ in lines[1:3])
+        assert 'STALE' in summaries and 'FREE none' not in summaries
         assert not any(role == 'load_low' for line,_ in lines if hasattr(line,'spans') for _,role in line.spans)
         scan.results = [result(gpus=[dict(card(used_mib=None, gpu_util=None, process_count=None),status='UNKNOWN')])]
         lines, counts = cluster_panel(scan, width=width)
@@ -186,3 +189,58 @@ def test_cli_cluster_does_not_create_or_write_history(tmp_path, monkeypatch, cap
     assert json.loads(capsys.readouterr().out)['nodes'][0]['gpus'][0]['status'] == 'FREE'
     assert main(args) == 0 and 'FREE' in capsys.readouterr().out
     assert not database.exists()
+
+
+def test_automatic_refresh_updates_occupancy_without_resetting_old_sample_age(monkeypatch):
+    good = lambda g: 'print('+repr(json.dumps({'gpus':[g]}))+')'
+    spawn_fake(monkeypatch, [good(card()), good(card(process_count=1)), good(card())])
+    config = ClusterConfig(nodes=({'name':'node-a','target':'node-a'},))
+    with LiveScan() as scan:
+        scan.start(config)
+        finish(scan)
+        old = scan.results[0]
+        sample_time = old['sample_monotonic']
+        assert not scan.refresh_if_due(now=scan.next_refresh-.01)
+        assert scan.refresh_if_due(now=scan.next_refresh)
+        pending = scan.results[0]
+        assert pending['status'] == 'REFRESHING' and pending['gpus'][0]['status'] == 'FREE'
+        assert pending['sample_monotonic'] == sample_time
+        assert gpu_status(pending['gpus'][0], pending, config, now=sample_time+31) == 'STALE'
+        finish(scan)
+        assert scan.results[0]['gpus'][0]['status'] == 'IN_USE'
+        assert scan.refresh_if_due(now=scan.next_refresh)
+        finish(scan)
+        assert scan.results[0]['gpus'][0]['status'] == 'FREE'
+
+
+def test_automatic_refresh_failure_clears_green_and_recovers(monkeypatch):
+    good = 'print('+repr(json.dumps({'gpus':[card()]}))+')'
+    spawn_fake(monkeypatch, [good, "raise SystemExit('offline')", good])
+    with LiveScan() as scan:
+        scan.start(ClusterConfig(nodes=({'name':'node-a','target':'node-a'},)))
+        finish(scan)
+        scan.refresh_if_due(now=scan.next_refresh)
+        finish(scan)
+        assert scan.results[0]['status'] == 'ERROR' and scan.results[0]['gpus'] == []
+        scan.refresh_if_due(now=scan.next_refresh)
+        assert scan.results[0]['status'] == 'SCANNING'
+        finish(scan)
+        assert scan.results[0]['status'] == 'DONE' and scan.results[0]['gpus'][0]['status'] == 'FREE'
+
+
+def test_automatic_refresh_does_not_overlap_and_close_disables_it(monkeypatch):
+    good = 'print('+repr(json.dumps({'gpus':[card()]}))+')'
+    commands = spawn_fake(monkeypatch, [good, 'import time;time.sleep(60)'])
+    with LiveScan() as scan:
+        scan.start(ClusterConfig(nodes=({'name':'node-a','target':'node-a'},)))
+        finish(scan)
+        scan.refresh_if_due(now=scan.next_refresh)
+        assert not scan.refresh_if_due(now=scan.next_refresh+100)
+        assert len(commands) == 2
+        scan.close()
+        assert not scan.refresh_if_due(now=time.monotonic()+100) and not scan.running
+
+
+def test_short_expiry_also_shortens_refresh_interval():
+    assert ClusterConfig(stale_after=2).refresh_seconds == 1
+    assert ClusterConfig().refresh_seconds == 10
